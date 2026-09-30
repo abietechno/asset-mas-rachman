@@ -1,0 +1,6 @@
+{
+  "name": "Asset Manajemen",
+  "description": "Aplikasi manajemen aset perusahaan untuk mencatat tanah, rumah/bangunan, kendaraan (mobil & motor) dengan detail pajak & surat, inventaris kantor, notifikasi jatuh tempo, dan analitik penyusutan otomatis bergaya iOS Cupertino.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
