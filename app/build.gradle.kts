@@ -13,21 +13,28 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.assetmanajemen.qvrpm"
+    applicationId = "id.biz.esbcloud.asset"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Nilai awal supaya manifest unit test tetap bisa di-merge; secrets plugin menimpanya dengan MAPS_API_KEY dari .env
+    // pada varian debug/release.
+    manifestPlaceholders["MAPS_API_KEY"] = "DEFAULT_API_KEY"
+
   }
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      // Keystore rilis tidak ikut git. Default: keystore lama proyek ESB di root repo (`key-esb-asset`);
+      // kata sandi & alias dibaca dari environment: STORE_PASSWORD, KEY_PASSWORD, KEY_ALIAS (default "upload").
+      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/../../../key-esb-asset"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
@@ -44,8 +51,14 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
+      buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://asset.esbcloud.biz.id\"")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      // Alamat server dashboard yang dipakai layar login (tidak ada kolom server di UI). Debug memakai prod juga;
+      // untuk dev lokal ganti ke "http://localhost/esb-assets/assets-management/dash/public" (+ `adb reverse tcp:80 tcp:80`).
+      buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://asset.esbcloud.biz.id\"")
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -90,14 +103,15 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.datastore.preferences) // simpan token & base URL sync
+  implementation(libs.androidx.work.runtime.ktx) // sync latar belakang ke dash
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
-  // implementation(libs.coil.compose)
+  implementation(libs.coil.compose) // foto aset dari dash
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
@@ -116,7 +130,11 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
+  implementation(libs.play.services.location) // GPS akurasi tinggi untuk pin lokasi aset
+  implementation(libs.play.services.maps)
+  implementation(libs.maps.compose) // peta pemilih pin (Tanah / Bangunan)
+  implementation(libs.places) // pencarian alamat / nama tempat dengan saran (autocomplete)
+  implementation(libs.kotlinx.coroutines.play.services) // .await() untuk Task Google
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
