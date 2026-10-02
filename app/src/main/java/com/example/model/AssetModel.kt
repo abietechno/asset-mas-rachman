@@ -2,6 +2,7 @@ package com.example.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import java.util.UUID
 
 enum class AssetType(val displayName: String) {
     TANAH("Tanah"),
@@ -37,6 +38,27 @@ enum class TaxStatus(val label: String) {
     CRITICAL("Kritis (< 14 Hari)"),
     WARNING("Mendekati (< 30 Hari)"),
     SAFE("Masa Berlaku Aman")
+}
+
+/**
+ * Kategori aset (dikelola di dashboard web, hanya-baca di HP). [kind] menentukan kelompok field di form
+ * dan rumus penyusutan; nama & jumlah kategori bebas ditambah user.
+ */
+@Entity(tableName = "categories")
+data class CategoryEntity(
+    @PrimaryKey val id: Long, // ID kategori di server
+    val name: String,
+    val kind: AssetType,
+    val usefulLifeYears: Int? = null,
+    val isSystem: Boolean = false
+)
+
+/** Status sinkronisasi sebuah baris aset terhadap dashboard (kolom `syncState`). */
+object SyncState {
+    const val SYNCED = 0 // sama dengan server
+    const val DIRTY = 1 // dibuat/diubah di HP, belum terkirim
+    const val DELETED = 2 // dihapus di HP, tombstone menunggu dikirim (disembunyikan dari UI)
+    const val LOCAL_ONLY = 3 // data contoh / lokal saja, tidak pernah dikirim
 }
 
 @Entity(tableName = "assets")
@@ -78,10 +100,23 @@ data class AssetEntity(
     val pbgNumber: String? = null, // Nomor IMB / PBG
 
     // --- Office Inventory specific fields ---
+    // --- Pin lokasi (Tanah / Rumah & Bangunan) ---
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationAccuracyM: Double? = null, // akurasi GPS dalam meter; null = titik digeser manual
+    val locationCapturedAt: Long? = null,
+
     val brandModel: String? = null, // e.g. "Apple MacBook Pro M3 Max", "Dell Server R750"
     val serialNumber: String? = null, // Serial Number hardware / QR tag
     val department: String? = null, // e.g. "IT Operations", "Finance"
 
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+
+    // --- Sinkronisasi dengan dashboard ---
+    val categoryId: Long? = null, // ID kategori di server; null = belum dipilih / mode offline (jenis dari [type])
+    val serverId: Long? = null, // ID aset di server (null = belum pernah terkirim)
+    val clientUuid: String = UUID.randomUUID().toString(), // ID stabil lintas perangkat, mencegah duplikat saat retry
+    val syncState: Int = SyncState.DIRTY,
+    val serverVersion: Long? = null // updated_at server (detik) terakhir yang dilihat perangkat; dasar deteksi konflik
 )

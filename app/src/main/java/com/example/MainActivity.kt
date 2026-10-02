@@ -29,7 +29,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import com.example.model.AssetType
 import com.example.ui.AssetViewModel
 import com.example.ui.CupertinoTab
@@ -52,6 +56,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Denyut "online" ke dashboard hanya berjalan selama aplikasi terlihat.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { viewModel.heartbeatLoop() }
+        }
+
         // Check if opened from tax reminder notification
         val targetAssetId = intent?.getLongExtra("TARGET_ASSET_ID", -1L) ?: -1L
         if (targetAssetId != -1L) {
@@ -71,10 +80,14 @@ class MainActivity : ComponentActivity() {
                 val isLoggedIn by viewModel.isLoggedIn.collectAsStateWithLifecycle()
                 Crossfade(targetState = isLoggedIn, label = "auth_fade") { loggedIn ->
                     if (!loggedIn) {
+                        val loginLoading by viewModel.loginLoading.collectAsStateWithLifecycle()
+                        val loginError by viewModel.loginError.collectAsStateWithLifecycle()
                         LoginScreen(
-                            onLoginSuccess = { id, role ->
-                                viewModel.login(id, role)
-                            }
+                            onLogin = { email, password ->
+                                viewModel.loginToServer(BuildConfig.DEFAULT_SERVER_URL, email, password)
+                            },
+                            isLoading = loginLoading,
+                            serverError = loginError
                         )
                     } else {
                         MainAppScreen(

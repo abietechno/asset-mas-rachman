@@ -42,6 +42,7 @@ fun DashboardScreen(
     val currentUserRole by viewModel.currentUserRole.collectAsStateWithLifecycle()
 
     var showLogoutDialog by remember { mutableStateOf(false) }
+    val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = modifier
@@ -101,6 +102,35 @@ fun DashboardScreen(
                     }
                 }
             )
+        }
+
+        // Mode offline: aset di HP ini belum tersambung ke dashboard, jadi tidak akan muncul di sana.
+        if (!sync.connected) {
+            item {
+                CupertinoCard(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .testTag("offline_banner"),
+                    backgroundColor = CupertinoOrange.copy(alpha = 0.10f),
+                    borderColor = CupertinoOrange.copy(alpha = 0.30f),
+                    onClick = { viewModel.logout() }
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Mode offline",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = CupertinoOrange
+                        )
+                        Text(
+                            text = "Aset di layar ini hanya ada di HP dan belum tersambung ke dashboard. " +
+                                "Ketuk untuk kembali ke layar login, isi alamat server, lalu masuk dengan akun dashboard.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CupertinoSecondaryLabel
+                        )
+                    }
+                }
+            }
         }
 
         // Critical Tax Alert Banner (If any vehicle is expiring or expired)
@@ -502,6 +532,7 @@ fun DashboardScreen(
     // Profile & Theme Settings Dialog
     if (showLogoutDialog) {
         val currentThemeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+        val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
 
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
@@ -539,6 +570,44 @@ fun DashboardScreen(
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "SINKRONISASI DASHBOARD",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CupertinoSecondaryLabel,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Text(
+                        text = if (sync.connected) "Terhubung ke ${sync.serverUrl}" else "Mode offline: data hanya ada di perangkat ini.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (sync.connected) {
+                        if (sync.pendingCount > 0) {
+                            Text(
+                                text = "${sync.pendingCount} perubahan menunggu dikirim",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CupertinoOrange
+                            )
+                        }
+                        sync.lastSyncAt?.let {
+                            Text(
+                                text = "Terakhir sinkron: " + java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale("id", "ID")).format(it),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CupertinoSecondaryLabel
+                            )
+                        }
+                    }
+                    sync.message?.let {
+                        Text(text = it, style = MaterialTheme.typography.bodySmall, color = CupertinoSecondaryLabel)
+                    }
+                    if (sync.connected) {
+                        TextButton(onClick = { viewModel.syncNow() }) {
+                            Text("Sinkronkan Sekarang", color = CupertinoPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     Text(
                         text = "TEMA TAMPILAN",
                         style = MaterialTheme.typography.labelSmall,

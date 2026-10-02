@@ -1,5 +1,6 @@
 package com.example.ui.dialogs
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -39,6 +40,8 @@ fun AssetDetailSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val categoryName = categories.firstOrNull { it.id == asset.categoryId }?.name ?: asset.type.displayName
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val dep = remember(asset) { DepreciationCalculator.calculate(asset) }
@@ -82,7 +85,7 @@ fun AssetDetailSheet(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = asset.type.displayName,
+                            text = categoryName,
                             style = MaterialTheme.typography.bodySmall,
                             color = CupertinoPrimary,
                             fontWeight = FontWeight.SemiBold
@@ -168,7 +171,7 @@ fun AssetDetailSheet(
 
                 CupertinoCard {
                     DetailInfoRow("Kode Tag Aset", asset.code)
-                    DetailInfoRow("Kategori Aset", asset.type.displayName)
+                    DetailInfoRow("Kategori Aset", categoryName)
                     DetailInfoRow("Status Operasional", asset.status.displayName)
                     DetailInfoRow("Kondisi Fisik", asset.condition.displayName)
                     DetailInfoRow("Lokasi Penempatan", asset.location)
@@ -351,6 +354,22 @@ fun AssetDetailSheet(
                         }
                         if (!asset.pbgNumber.isNullOrBlank()) {
                             DetailInfoRow("No. IMB / PBG", asset.pbgNumber)
+                        }
+                        if (asset.latitude != null && asset.longitude != null) {
+                            DetailInfoRow("Koordinat", "%.6f, %.6f".format(asset.latitude, asset.longitude))
+                            DetailInfoRow(
+                                "Akurasi Lokasi",
+                                asset.locationAccuracyM?.let { "±${it.toInt()} m (GPS)" } ?: "Titik manual"
+                            )
+                            TextButton(
+                                onClick = {
+                                    // geo: membuka aplikasi peta apa pun; label muncul sebagai nama pin.
+                                    val label = android.net.Uri.encode(asset.name)
+                                    val uri = android.net.Uri.parse("geo:${asset.latitude},${asset.longitude}?q=${asset.latitude},${asset.longitude}($label)")
+                                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+                                },
+                                modifier = Modifier.testTag("btn_open_in_maps")
+                            ) { Text("Buka di Google Maps", fontWeight = FontWeight.Bold) }
                         }
                     }
 

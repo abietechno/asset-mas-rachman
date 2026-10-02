@@ -9,11 +9,22 @@ import com.example.model.AssetCondition
 import com.example.model.AssetEntity
 import com.example.model.AssetStatus
 import com.example.model.AssetType
+import com.example.model.CategoryEntity
 import com.example.model.TaxStatus
 import com.example.model.VehicleType
+import com.example.sync.ApiClient
+import com.example.sync.LoginRequest
+import com.example.sync.SyncEngine
+import com.example.sync.SyncPrefs
+import com.example.sync.SyncScheduler
+import com.example.sync.serverMessage
+import retrofit2.HttpException
+import java.io.IOException
 import com.example.util.DepreciationCalculator
 import com.example.util.FormatUtils
 import com.example.util.NotificationHelper
+import com.example.util.TaxReminders
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -24,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class CupertinoTab(val label: String) {
     DASHBOARD("Ringkasan"),
@@ -43,6 +55,15 @@ data class DashboardAnalytics(
     val categoryStats: Map<AssetType, CategoryStat> = emptyMap()
 )
 
+/** Ringkasan sinkronisasi untuk UI pengaturan. */
+data class SyncStatus(
+    val connected: Boolean = false, // login ke dashboard (punya token)
+    val serverUrl: String? = null,
+    val pendingCount: Int = 0,
+    val lastSyncAt: Long? = null,
+    val message: String? = null
+)
+
 data class CategoryStat(
     val type: AssetType,
     val count: Int,
@@ -59,6 +80,9 @@ enum class ThemeMode(val label: String) {
 
 class AssetViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val db = AppDatabase.getDatabase(application)
+    private val dao = db.assetDao()
+    private val prefs = SyncPrefs(application)
     private val repository: AssetRepository
 
     // Theme Mode
@@ -79,31 +103,156 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentUserRole = MutableStateFlow("Asset Manager")
     val currentUserRole: StateFlow<String> = _currentUserRole.asStateFlow()
 
-    fun login(identifier: String, role: String) {
-        _currentUserName.value = identifier
-        _currentUserRole.value = role
-        _isLoggedIn.value = true
-        viewModelScope.launch {
-            _userMessage.emit("Selamat datang, $identifier! Anda masuk sebagai $role.")
-        }
-    }
-
     fun logout() {
-        _isLoggedIn.value = false
-        _currentTab.value = CupertinoTab.DASHBOARD
         viewModelScope.launch {
+            val session = prefs.current()
+            if (session.token != null && session.baseUrl != null) {
+                // Kirim perubahan yang tertunda sebelum token dicabut; gagal pun tetap logout (data tetap di HP).
+                runCatching { SyncEngine(db, prefs).sync() }
+                runCatching { ApiClient.create(session.baseUrl, session.token, prefs.deviceInfo()).logout() }
+                prefs.clearSession()
+                SyncScheduler.cancelAll(getApplication())
+            }
+            _isLoggedIn.value = false
+            _currentTab.value = CupertinoTab.DASHBOARD
             _userMessage.emit("Anda telah keluar dari sistem.")
         }
     }
 
-    init {
-        val db = AppDatabase.getDatabase(application)
-        repository = AssetRepository(db.assetDao())
+    // --- Login ke dashboard & sinkronisasi ---
+
+    private val _loginLoading = MutableStateFlow(false)
+    val loginLoading: StateFlow<Boolean> = _loginLoading.asStateFlow()
+
+    private val _loginError = MutableStateFlow<String?>(null)
+    val loginError: StateFlow<String?> = _loginError.asStateFlow()
+
+    /** URL server terakhir yang dipakai, untuk mengisi form login. */
+    private val _savedServerUrl = MutableStateFlow("")
+    val savedServerUrl: StateFlow<String> = _savedServerUrl.asStateFlow()
+
+    fun loginToServer(serverUrl: String, email: String, password: String) {
         viewModelScope.launch {
-            repository.initializeSampleDataIfEmpty()
+            _loginLoading.value = true
+            _loginError.value = null
+            try {
+                val baseUrl = ApiClient.normalizeBaseUrl(serverUrl)
+                val response = ApiClient.create(baseUrl, null, prefs.deviceInfo()).login(LoginRequest(email.trim(), password))
+                val data = response.data ?: throw IllegalStateException(response.message ?: "Respons server tidak valid")
+
+                val owner = "$baseUrl|${data.user.id}"
+                val previousOwner = prefs.current().dataOwner
+                withContext(Dispatchers.IO) {
+                    // Akun berbeda: data lokal milik akun lain dibuang agar tidak terkirim ke akun ini.
+                    if (previousOwner != null && previousOwner != owner) {
+                        dao.deleteAll()
+                        dao.deleteAllCategories()
+                    } else {
+                        dao.deleteLocalOnly()
+                    }
+                }
+                prefs.saveLogin(baseUrl, data.token, data.user, owner, resetPull = previousOwner != owner)
+
+                _currentUserName.value = data.user.name
+                _currentUserRole.value = data.user.role ?: "Asset Manager"
+                _savedServerUrl.value = baseUrl
+                _isLoggedIn.value = true
+                SyncScheduler.schedulePeriodic(getApplication())
+                SyncScheduler.syncNow(getApplication())
+                _userMessage.emit("Selamat datang, ${data.user.name}! Menyinkronkan data aset...")
+            } catch (e: HttpException) {
+                _loginError.value = e.serverMessage()
+                    ?: if (e.code() == 404) "Alamat server tidak ditemukan (HTTP 404)." else "Login gagal (HTTP ${e.code()})."
+            } catch (e: IOException) {
+                _loginError.value = "Tidak dapat terhubung ke server. Periksa alamat dan koneksi."
+            } catch (e: IllegalStateException) {
+                _loginError.value = e.message
+            } finally {
+                _loginLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Denyut tiap menit selama aplikasi terbuka (dipanggil dari MainActivity hanya saat STARTED), supaya
+     * dashboard menampilkan perangkat ini online. Gagal jaringan diabaikan; berikutnya dicoba lagi.
+     */
+    suspend fun heartbeatLoop() {
+        var api: com.example.sync.ApiService? = null
+        var apiKey: Pair<String, String>? = null
+        while (true) {
+            val session = prefs.current()
+            if (session.token != null && session.baseUrl != null) {
+                val key = session.baseUrl to session.token
+                if (key != apiKey) {
+                    api = ApiClient.create(session.baseUrl, session.token, prefs.deviceInfo())
+                    apiKey = key
+                }
+                try {
+                    api?.heartbeat()
+                } catch (e: HttpException) {
+                    if (e.code() == 401) prefs.clearSession("Sesi berakhir, silakan login ulang untuk melanjutkan sinkronisasi.")
+                } catch (e: IOException) {
+                    // offline: dicoba lagi pada denyut berikutnya
+                }
+            }
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
+
+    fun clearLoginError() {
+        _loginError.value = null
+    }
+
+    fun syncNow() {
+        viewModelScope.launch {
+            if (prefs.current().token == null) {
+                _userMessage.emit("Masuk ke server terlebih dahulu untuk sinkronisasi.")
+            } else {
+                SyncScheduler.syncNow(getApplication())
+                _userMessage.emit("Sinkronisasi dimulai...")
+            }
+        }
+    }
+
+    private fun requestSync() {
+        viewModelScope.launch {
+            if (prefs.current().token != null) SyncScheduler.syncNow(getApplication())
+        }
+    }
+
+    init {
+        repository = AssetRepository(dao)
+        viewModelScope.launch {
+            val session = prefs.current()
+            _savedServerUrl.value = session.baseUrl.orEmpty()
+            if (session.token != null) {
+                // Sesi server masih ada: langsung masuk dan lanjutkan sinkronisasi berkala.
+                _currentUserName.value = session.userName ?: _currentUserName.value
+                _currentUserRole.value = session.userRole ?: _currentUserRole.value
+                _isLoggedIn.value = true
+                SyncScheduler.schedulePeriodic(application)
+            }
         }
         NotificationHelper.initNotificationChannel(application)
+        // Pengingat pajak/plat/servis berjalan otomatis di latar belakang; cek sekali saat aplikasi dibuka.
+        TaxReminders.schedule(application)
+        viewModelScope.launch { TaxReminders.check(application) }
     }
+
+    /** Kategori dari dashboard; kosong di mode offline (form memakai 4 jenis bawaan). */
+    val categories: StateFlow<List<CategoryEntity>> =
+        repository.categories.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val syncStatus: StateFlow<SyncStatus> = combine(prefs.snapshot, dao.observePendingCount()) { snap, pending ->
+        SyncStatus(
+            connected = snap.token != null,
+            serverUrl = snap.baseUrl,
+            pendingCount = pending,
+            lastSyncAt = snap.lastSyncAt,
+            message = snap.lastMessage
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncStatus())
 
     // Navigation state
     private val _currentTab = MutableStateFlow(CupertinoTab.DASHBOARD)
@@ -255,6 +404,7 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedAsset.value = asset
             }
             closeAddEdit()
+            requestSync()
         }
     }
 
@@ -263,6 +413,7 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteAsset(asset)
             _userMessage.emit("Aset '${asset.name}' telah dihapus.")
             closeAssetDetail()
+            requestSync()
         }
     }
 
@@ -276,6 +427,7 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedAsset.value = updated
             }
             _userMessage.emit("Pajak tahunan untuk ${vehicle.licensePlate ?: vehicle.name} berhasil diperpanjang +1 tahun.")
+            requestSync()
         }
     }
 

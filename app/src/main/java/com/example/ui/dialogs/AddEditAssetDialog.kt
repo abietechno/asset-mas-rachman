@@ -1,5 +1,6 @@
 package com.example.ui.dialogs
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +32,9 @@ import com.example.ui.theme.*
 import com.example.util.FormatUtils
 import java.util.Calendar
 
+/** Pilihan kategori di form; [id] null = jenis bawaan saat belum ada data dari server. */
+private data class CategoryOption(val id: Long?, val name: String, val kind: AssetType, val usefulLifeYears: Int?)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditAssetDialog(
@@ -40,8 +44,26 @@ fun AddEditAssetDialog(
 ) {
     val isEditMode = editingAsset != null && editingAsset.id != 0L
 
+    val serverCategories by viewModel.categories.collectAsStateWithLifecycle()
+    // Tanpa data server (mode offline) form memakai 4 jenis bawaan; kategori kustom dari dashboard muncul setelah sync.
+    val options = if (serverCategories.isEmpty()) {
+        AssetType.values().map { CategoryOption(null, it.displayName, it, null) }
+    } else {
+        serverCategories.map { CategoryOption(it.id, it.name, it.kind, it.usefulLifeYears) }
+    }
+
     var type by remember { mutableStateOf(editingAsset?.type ?: AssetType.KENDARAAN) }
+    var categoryId by remember {
+        mutableStateOf(editingAsset?.categoryId ?: serverCategories.firstOrNull { it.kind == type && it.isSystem }?.id)
+    }
     var name by remember { mutableStateOf(editingAsset?.name ?: "") }
+
+    // Pin lokasi (hanya Tanah / Rumah & Bangunan)
+    var latitude by remember { mutableStateOf(editingAsset?.latitude) }
+    var longitude by remember { mutableStateOf(editingAsset?.longitude) }
+    var locAccuracy by remember { mutableStateOf(editingAsset?.locationAccuracyM) }
+    var locCapturedAt by remember { mutableStateOf(editingAsset?.locationCapturedAt) }
+    var showLocationPicker by remember { mutableStateOf(false) }
     var code by remember {
         mutableStateOf(
             editingAsset?.code ?: "AST-${type.name.take(3)}-${(System.currentTimeMillis() % 10000)}"
@@ -152,6 +174,11 @@ fun AddEditAssetDialog(
                                     name = name.trim(),
                                     code = code.trim(),
                                     type = type,
+                                    categoryId = categoryId,
+                                    latitude = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) latitude else null,
+                                    longitude = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) longitude else null,
+                                    locationAccuracyM = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) locAccuracy else null,
+                                    locationCapturedAt = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) locCapturedAt else null,
                                     acquisitionCost = cost,
                                     acquisitionDate = editingAsset?.acquisitionDate ?: System.currentTimeMillis(),
                                     usefulLifeYears = usefulYears,
@@ -227,8 +254,8 @@ fun AddEditAssetDialog(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            AssetType.values().forEach { t ->
-                                val isSelected = t == type
+                            options.forEach { o ->
+                                val isSelected = if (o.id != null) o.id == categoryId else o.kind == type
                                 val bg = if (isSelected) CupertinoPrimary else CupertinoFill
                                 val textCol = if (isSelected) Color.White else CupertinoLabel
 
@@ -237,21 +264,22 @@ fun AddEditAssetDialog(
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(bg)
                                         .clickable {
-                                            type = t
+                                            type = o.kind
+                                            categoryId = o.id
                                             if (!isEditMode) {
-                                                code = "AST-${t.name.take(3)}-${(System.currentTimeMillis() % 10000)}"
-                                                usefulLifeStr = when (t) {
-                                                    AssetType.TANAH -> "0"
-                                                    AssetType.BANGUNAN -> "20"
-                                                    AssetType.KENDARAAN -> "8"
-                                                    AssetType.INVENTARIS -> "4"
-                                                }
+                                                code = "AST-${o.kind.name.take(3)}-${(System.currentTimeMillis() % 10000)}"
+                                                usefulLifeStr = (o.usefulLifeYears ?: when (o.kind) {
+                                                    AssetType.TANAH -> 0
+                                                    AssetType.BANGUNAN -> 20
+                                                    AssetType.KENDARAAN -> 8
+                                                    AssetType.INVENTARIS -> 4
+                                                }).toString()
                                             }
                                         }
                                         .padding(horizontal = 14.dp, vertical = 8.dp)
                                 ) {
                                     Text(
-                                        text = t.displayName,
+                                        text = o.name,
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         color = textCol
@@ -516,6 +544,80 @@ fun AddEditAssetDialog(
                                         )
                                     }
                                 }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+                    }
+
+                    // Pin lokasi di peta (TANAH & BANGUNAN)
+                    if (type == AssetType.TANAH || type == AssetType.BANGUNAN) {
+                        item {
+                            Text(
+                                text = "LOKASI DI PETA",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CupertinoSecondaryLabel,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+
+                            CupertinoCard {
+                                val lat = latitude
+                                val lng = longitude
+                                if (lat != null && lng != null) {
+                                    Text(
+                                        text = "%.6f, %.6f".format(lat, lng),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = locAccuracy?.let { "Akurasi GPS ±${it.toInt()} m" } ?: "Titik ditentukan manual",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = CupertinoSecondaryLabel
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Belum ada pin lokasi. Ambil dari GPS saat Anda berada di lokasi aset.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = CupertinoSecondaryLabel
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { showLocationPicker = true },
+                                        modifier = Modifier.weight(1f).testTag("btn_set_location")
+                                    ) { Text(if (lat != null) "Ubah Pin" else "Ambil Lokasi") }
+                                    if (lat != null) {
+                                        TextButton(
+                                            onClick = {
+                                                latitude = null
+                                                longitude = null
+                                                locAccuracy = null
+                                                locCapturedAt = null
+                                            }
+                                        ) { Text("Hapus Pin", color = CupertinoRed) }
+                                    }
+                                }
+                            }
+
+                            if (showLocationPicker) {
+                                LocationPickerDialog(
+                                    initialLat = latitude,
+                                    initialLng = longitude,
+                                    initialAccuracyM = locAccuracy,
+                                    onDismiss = { showLocationPicker = false },
+                                    onConfirm = { la, lo, acc, addr ->
+                                        latitude = la
+                                        longitude = lo
+                                        locAccuracy = acc
+                                        locCapturedAt = System.currentTimeMillis()
+                                        // Alamat dari pencarian/peta mengisi kolom Lokasi bila masih kosong atau nilai awal bawaan.
+                                        if (!addr.isNullOrBlank() && (location.isBlank() || location.startsWith("Kantor Pusat"))) location = addr
+                                        showLocationPicker = false
+                                    }
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(16.dp))
