@@ -57,28 +57,7 @@ fun VehiclesTaxScreen(
         item {
             CupertinoTopBar(
                 title = "Kendaraan & Pajak",
-                subtitle = "Monitoring Masa Berlaku STNK & Legalitas",
-                actions = {
-                    IconButton(
-                        onClick = { viewModel.openAddAsset(AssetType.KENDARAAN) },
-                        modifier = Modifier.testTag("add_vehicle_button")
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(CupertinoPrimary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Tambah Kendaraan",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
+                subtitle = "Monitoring Masa Berlaku STNK & Legalitas"
             )
         }
 

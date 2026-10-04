@@ -15,6 +15,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -44,8 +45,11 @@ import com.example.ui.screens.AssetListScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.VehiclesTaxScreen
 import com.example.ui.theme.*
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
@@ -153,9 +157,34 @@ fun MainAppScreen(
         }
     }
 
+    // Laporan tidak lagi punya tab sendiri; dibuka sebagai layar penuh dari Pengaturan / Akses Cepat.
+    var showReports by remember { mutableStateOf(false) }
+
     CupertinoScaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.systemBars,
+        floatingActionButton = {
+            // Tombol tambah mengapung di kanan bawah; Scaffold menempatkannya di atas bottom bar.
+            if (currentTab != CupertinoTab.SETTINGS) {
+                FloatingActionButton(
+                    onClick = {
+                        when (currentTab) {
+                            CupertinoTab.VEHICLES -> viewModel.openAddAsset(AssetType.KENDARAAN)
+                            CupertinoTab.ASSETS -> viewModel.openAddAsset(viewModel.assetCategoryFilter.value)
+                            else -> viewModel.openAddAsset()
+                        }
+                    },
+                    containerColor = CupertinoPrimary,
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .padding(bottom = 10.dp, end = 4.dp)
+                        .testTag("fab_add_asset")
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Tambah Aset")
+                }
+            }
+        },
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState) { data ->
                 Snackbar(
@@ -170,6 +199,7 @@ fun MainAppScreen(
             val glass = LocalCupertinoGlass.current
             Surface(
                 color = glass.surface.copy(alpha = 0.92f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 shadowElevation = 8.dp,
                 border = BorderStroke(0.5.dp, glass.border),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -269,20 +299,20 @@ fun MainAppScreen(
                         modifier = Modifier.testTag("nav_tab_vehicles")
                     )
 
-                    // Tab 4: Real-time Reports
+                    // Tab 4: Pengaturan (akun, sinkronisasi, tema, laporan)
                     NavigationBarItem(
-                        selected = currentTab == CupertinoTab.REPORTS,
-                        onClick = { viewModel.selectTab(CupertinoTab.REPORTS) },
+                        selected = currentTab == CupertinoTab.SETTINGS,
+                        onClick = { viewModel.selectTab(CupertinoTab.SETTINGS) },
                         icon = {
                             Icon(
-                                imageVector = if (currentTab == CupertinoTab.REPORTS) Icons.Default.Assessment else Icons.Outlined.Assessment,
-                                contentDescription = "Laporan"
+                                imageVector = if (currentTab == CupertinoTab.SETTINGS) Icons.Default.Settings else Icons.Outlined.Settings,
+                                contentDescription = "Pengaturan"
                             )
                         },
                         label = {
                             Text(
-                                text = "Laporan",
-                                fontWeight = if (currentTab == CupertinoTab.REPORTS) FontWeight.Bold else FontWeight.Normal
+                                text = "Pengaturan",
+                                fontWeight = if (currentTab == CupertinoTab.SETTINGS) FontWeight.Bold else FontWeight.Normal
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
@@ -292,7 +322,7 @@ fun MainAppScreen(
                             unselectedIconColor = CupertinoSecondaryLabel,
                             unselectedTextColor = CupertinoSecondaryLabel
                         ),
-                        modifier = Modifier.testTag("nav_tab_reports")
+                        modifier = Modifier.testTag("nav_tab_settings")
                     )
                 }
             }
@@ -307,11 +337,15 @@ fun MainAppScreen(
                 when (tab) {
                     CupertinoTab.DASHBOARD -> DashboardScreen(
                         viewModel = viewModel,
-                        onNavigateTab = { viewModel.selectTab(it) }
+                        onNavigateTab = { viewModel.selectTab(it) },
+                        onOpenReports = { showReports = true }
                     )
                     CupertinoTab.ASSETS -> AssetListScreen(viewModel = viewModel)
                     CupertinoTab.VEHICLES -> VehiclesTaxScreen(viewModel = viewModel)
-                    CupertinoTab.REPORTS -> ReportsScreen(viewModel = viewModel)
+                    CupertinoTab.SETTINGS -> SettingsScreen(
+                        viewModel = viewModel,
+                        onOpenReports = { showReports = true }
+                    )
                 }
             }
         }
@@ -323,6 +357,24 @@ fun MainAppScreen(
                 viewModel = viewModel,
                 onDismiss = { viewModel.closeAssetDetail() }
             )
+        }
+
+        // Laporan Operasional (layar penuh)
+        if (showReports) {
+            Dialog(
+                onDismissRequest = { showReports = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    ReportsScreen(viewModel = viewModel, onClose = { showReports = false })
+                }
+            }
         }
 
         // Add / Edit Asset Dialog

@@ -28,12 +28,14 @@ import com.example.ui.AssetViewModel
 import com.example.ui.CupertinoTab
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import com.example.util.DepreciationCalculator
 import com.example.util.FormatUtils
 
 @Composable
 fun DashboardScreen(
     viewModel: AssetViewModel,
     onNavigateTab: (CupertinoTab) -> Unit,
+    onOpenReports: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val analytics by viewModel.dashboardAnalytics.collectAsStateWithLifecycle()
@@ -41,8 +43,14 @@ fun DashboardScreen(
     val currentUserName by viewModel.currentUserName.collectAsStateWithLifecycle()
     val currentUserRole by viewModel.currentUserRole.collectAsStateWithLifecycle()
 
-    var showLogoutDialog by remember { mutableStateOf(false) }
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
+
+    // Nilai perolehan vs nilai buku (garis lurus, tanah tidak menyusut) - dihitung ulang hanya saat data berubah.
+    val valuation = remember(allAssets) {
+        val cost = allAssets.sumOf { it.acquisitionCost }
+        val book = allAssets.sumOf { DepreciationCalculator.calculate(it).currentBookValue }
+        Triple(cost, book, (cost - book).coerceAtLeast(0.0))
+    }
 
     LazyColumn(
         modifier = modifier
@@ -57,49 +65,12 @@ fun DashboardScreen(
                 title = "Asset Management",
                 subtitle = "$currentUserName • $currentUserRole",
                 actions = {
-                    // Profile & Logout Button
-                    IconButton(
-                        onClick = { showLogoutDialog = true },
-                        modifier = Modifier.testTag("user_profile_button")
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(CupertinoFill),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Person,
-                                contentDescription = "Profil & Keluar",
-                                tint = CupertinoLabel,
-                                modifier = Modifier.size(20.dp)
-                            )
+                    SyncStatusIcon(
+                        status = sync,
+                        onClick = {
+                            if (sync.connected) viewModel.syncNow() else onNavigateTab(CupertinoTab.SETTINGS)
                         }
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // Quick Add Button
-                    IconButton(
-                        onClick = { viewModel.openAddAsset() },
-                        modifier = Modifier.testTag("top_add_asset_button")
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(CupertinoPrimary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Tambah Aset",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                    )
                 }
             )
         }
@@ -113,7 +84,7 @@ fun DashboardScreen(
                         .testTag("offline_banner"),
                     backgroundColor = CupertinoOrange.copy(alpha = 0.10f),
                     borderColor = CupertinoOrange.copy(alpha = 0.30f),
-                    onClick = { viewModel.logout() }
+                    onClick = { onNavigateTab(CupertinoTab.SETTINGS) }
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
@@ -124,7 +95,7 @@ fun DashboardScreen(
                         )
                         Text(
                             text = "Aset di layar ini hanya ada di HP dan belum tersambung ke dashboard. " +
-                                "Ketuk untuk kembali ke layar login, isi alamat server, lalu masuk dengan akun dashboard.",
+                                "Ketuk untuk membuka Pengaturan.",
                             style = MaterialTheme.typography.bodySmall,
                             color = CupertinoSecondaryLabel
                         )
@@ -186,44 +157,66 @@ fun DashboardScreen(
                         )
                     }
 
+                }
+            }
+        }
+
+        // Nilai aset: total perolehan + nilai buku setelah penyusutan
+        item {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                CupertinoGlassCard {
+                    Text(
+                        text = "TOTAL NILAI ASET",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CupertinoSecondaryLabel,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = FormatUtils.formatRupiah(valuation.first),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "Nilai perolehan • ${analytics.totalAssetsCount} unit aset",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CupertinoSecondaryLabel
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = CupertinoSeparator, thickness = 0.5.dp)
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = { viewModel.triggerTaxRemindersNow() },
-                            colors = ButtonDefaults.buttonColors(containerColor = CupertinoRed),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Kirim Notifikasi",
+                                text = "Nilai buku kini",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
+                                color = CupertinoSecondaryLabel
+                            )
+                            Text(
+                                text = FormatUtils.formatCompactRupiah(valuation.second),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = CupertinoGreen,
+                                maxLines = 1
                             )
                         }
-
-                        OutlinedButton(
-                            onClick = { onNavigateTab(CupertinoTab.VEHICLES) },
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, CupertinoRed),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Periksa Detail",
+                                text = "Akumulasi penyusutan",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = CupertinoRed,
-                                fontWeight = FontWeight.Bold
+                                color = CupertinoSecondaryLabel,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = FormatUtils.formatCompactRupiah(valuation.third),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = CupertinoOrange,
+                                maxLines = 1
                             )
                         }
                     }
@@ -248,9 +241,9 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     CupertinoMetricCard(
-                        title = "Total Unit Aset",
+                        title = "Total Aset",
                         value = "${analytics.totalAssetsCount} Unit",
-                        subtitle = "Seluruh Kategori",
+                        subtitle = "",
                         icon = Icons.Outlined.Inventory2,
                         iconColor = CupertinoPrimary,
                         iconBgColor = CupertinoPrimary.copy(alpha = 0.12f),
@@ -258,9 +251,9 @@ fun DashboardScreen(
                     )
 
                     CupertinoMetricCard(
-                        title = "Aktif Digunakan",
+                        title = "Digunakan",
                         value = "${analytics.activeAssetsCount} Unit",
-                        subtitle = "Sedang Operasional",
+                        subtitle = "",
                         icon = Icons.Outlined.CheckCircle,
                         iconColor = CupertinoGreen,
                         iconBgColor = CupertinoGreenLight,
@@ -275,9 +268,9 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     CupertinoMetricCard(
-                        title = "Siap Pakai / Standby",
+                        title = "Standby",
                         value = "${analytics.standbyAssetsCount} Unit",
-                        subtitle = "Tersedia di Pool",
+                        subtitle = "",
                         icon = Icons.Outlined.Schedule,
                         iconColor = CupertinoPurple,
                         iconBgColor = CupertinoPurpleLight,
@@ -285,9 +278,9 @@ fun DashboardScreen(
                     )
 
                     CupertinoMetricCard(
-                        title = "Butuh Servis / Perbaikan",
+                        title = "Perlu Servis",
                         value = "${analytics.maintenanceAssetsCount} Unit",
-                        subtitle = "Perlu Ditangani",
+                        subtitle = "",
                         icon = Icons.Outlined.Build,
                         iconColor = CupertinoOrange,
                         iconBgColor = CupertinoOrangeLight,
@@ -494,181 +487,45 @@ fun DashboardScreen(
             }
         }
 
-        // Section: Akses Cepat Lapangan
+        // Section: Akses Cepat (ikon, supaya label tidak terpotong seperti tombol lebar sebelumnya)
         item {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(
-                    text = "AKSES CEPAT OPERASIONAL",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = CupertinoSecondaryLabel,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+            CupertinoSectionHeader(title = "Akses Cepat")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CupertinoQuickAction(
+                    label = "Catat Aset",
+                    icon = Icons.Outlined.AddCircle,
+                    color = CupertinoPrimary,
+                    onClick = { viewModel.openAddAsset() },
+                    modifier = Modifier.weight(1f)
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    CupertinoActionButton(
-                        text = "+ Catat Aset",
-                        onClick = { viewModel.openAddAsset() },
-                        icon = Icons.Default.AddCircleOutline,
-                        backgroundColor = CupertinoPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    CupertinoActionButton(
-                        text = "Laporan Lapangan",
-                        onClick = { onNavigateTab(CupertinoTab.REPORTS) },
-                        icon = Icons.Default.Assessment,
-                        backgroundColor = CupertinoPurple,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                CupertinoQuickAction(
+                    label = "Cari Aset",
+                    icon = Icons.Outlined.Search,
+                    color = CupertinoTeal,
+                    onClick = { onNavigateTab(CupertinoTab.ASSETS) },
+                    modifier = Modifier.weight(1f)
+                )
+                CupertinoQuickAction(
+                    label = "Pajak",
+                    icon = Icons.Outlined.DirectionsCar,
+                    color = CupertinoOrange,
+                    onClick = { onNavigateTab(CupertinoTab.VEHICLES) },
+                    modifier = Modifier.weight(1f),
+                    badge = analytics.vehiclesWithTaxWarningCount.takeIf { it > 0 }?.toString()
+                )
+                CupertinoQuickAction(
+                    label = "Laporan",
+                    icon = Icons.Outlined.Assessment,
+                    color = CupertinoPurple,
+                    onClick = onOpenReports,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
-    }
-
-    // Profile & Theme Settings Dialog
-    if (showLogoutDialog) {
-        val currentThemeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-        val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
-
-        AlertDialog(
-            onDismissRequest = { showLogoutDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(CupertinoPrimary.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = CupertinoPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = currentUserName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = currentUserRole,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = CupertinoSecondaryLabel
-                        )
-                    }
-                }
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "SINKRONISASI DASHBOARD",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = CupertinoSecondaryLabel,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-                    Text(
-                        text = if (sync.connected) "Terhubung ke ${sync.serverUrl}" else "Mode offline: data hanya ada di perangkat ini.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (sync.connected) {
-                        if (sync.pendingCount > 0) {
-                            Text(
-                                text = "${sync.pendingCount} perubahan menunggu dikirim",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = CupertinoOrange
-                            )
-                        }
-                        sync.lastSyncAt?.let {
-                            Text(
-                                text = "Terakhir sinkron: " + java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale("id", "ID")).format(it),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = CupertinoSecondaryLabel
-                            )
-                        }
-                    }
-                    sync.message?.let {
-                        Text(text = it, style = MaterialTheme.typography.bodySmall, color = CupertinoSecondaryLabel)
-                    }
-                    if (sync.connected) {
-                        TextButton(onClick = { viewModel.syncNow() }) {
-                            Text("Sinkronkan Sekarang", color = CupertinoPrimary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = "TEMA TAMPILAN",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = CupertinoSecondaryLabel,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    // Theme selector buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            com.example.ui.ThemeMode.SYSTEM to "📱 Sistem",
-                            com.example.ui.ThemeMode.LIGHT to "☀️ Terang",
-                            com.example.ui.ThemeMode.DARK to "🌙 Gelap"
-                        ).forEach { (mode, title) ->
-                            val isSelected = currentThemeMode == mode
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) CupertinoPrimary else CupertinoFill,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { viewModel.setThemeMode(mode) }
-                            ) {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Mode Terang memberikan tampilan bersih dan cerah. Pada Mode Gelap, warna font otomatis disesuaikan menjadi putih terang.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = CupertinoSecondaryLabel
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                        viewModel.logout()
-                    }
-                ) {
-                    Text("Keluar Akun", color = CupertinoRed, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("Tutup")
-                }
-            }
-        )
     }
 }

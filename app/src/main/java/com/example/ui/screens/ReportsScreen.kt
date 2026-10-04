@@ -49,6 +49,7 @@ enum class ReportFilter(val label: String) {
 @Composable
 fun ReportsScreen(
     viewModel: AssetViewModel,
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -122,7 +123,18 @@ fun ReportsScreen(
         item {
             CupertinoTopBar(
                 title = "Laporan Operasional",
-                subtitle = "Inventaris, Kondisi & Kepatuhan Pajak",
+                subtitle = "Per $reportTimestamp",
+                navigationIcon = onClose?.let {
+                    {
+                        IconButton(onClick = it, modifier = Modifier.testTag("close_report_button")) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Tutup",
+                                tint = CupertinoSecondaryLabel
+                            )
+                        }
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = {
@@ -153,112 +165,6 @@ fun ReportsScreen(
                     }
                 }
             )
-        }
-
-        // Live Generation Info Card
-        item {
-            CupertinoCard(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                backgroundColor = CupertinoCardSecondary
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(CupertinoPurple.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Sync,
-                            contentDescription = null,
-                            tint = CupertinoPurple,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Sinkronisasi Real-Time Lapangan",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Data status aset dan kepatuhan STNK terupdate per $reportTimestamp",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = CupertinoSecondaryLabel
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            val text = generateShareableReportText()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Laporan Operasional Aset", text))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = CupertinoFill),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier
-                            .height(34.dp)
-                            .testTag("copy_report_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = null,
-                            tint = CupertinoLabel,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Salin Teks",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CupertinoLabel,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Button(
-                        onClick = {
-                            val text = generateShareableReportText()
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, "Laporan Operasional Aset Perusahaan")
-                                putExtra(Intent.EXTRA_TEXT, text)
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "Ekspor / Bagikan Laporan"))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = CupertinoPurple),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FileDownload,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Ekspor / Bagikan",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
         }
 
         // Executive Operational Summary Card
