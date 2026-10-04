@@ -112,8 +112,8 @@ val Typography = Typography(
     labelSmall = TextStyle(
         fontFamily = Inter,
         fontWeight = FontWeight.Medium,
-        fontSize = 10.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 0.5.sp
+        fontSize = 11.sp, // minimal terbaca di lapangan (sebelumnya 10sp)
+        lineHeight = 15.sp,
+        letterSpacing = 0.3.sp
     )
 )

@@ -11,6 +11,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -61,6 +66,7 @@ import com.example.ui.theme.CupertinoSeparator
 import com.example.ui.theme.CupertinoSystemBackground
 
 /** Login ke dashboard: hanya email dan kata sandi. Alamat server diatur lewat konfigurasi build (DEFAULT_SERVER_URL). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LoginScreen(
     onLogin: (email: String, password: String) -> Unit,
@@ -69,6 +75,8 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
+    // Keyboard terbuka: logo disembunyikan supaya kolom email & kata sandi langsung terlihat tanpa scroll.
+    val imeVisible = WindowInsets.isImeVisible
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -108,28 +116,33 @@ fun LoginScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFF007AFF), Color(0xFF5856D6))))
-                    .border(1.5.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(22.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Inventory2,
-                    contentDescription = "Asset Management",
-                    tint = Color.White,
-                    modifier = Modifier.size(46.dp)
-                )
-            }
+            AnimatedVisibility(visible = !imeVisible) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size(88.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(Brush.linearGradient(listOf(Color(0xFF007AFF), Color(0xFF5856D6))))
+                            .border(1.5.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(22.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Inventory2,
+                            contentDescription = "Asset Management",
+                            tint = Color.White,
+                            modifier = Modifier.size(46.dp)
+                        )
+                    }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
 
             Text(
                 text = "Asset Management",
@@ -138,7 +151,7 @@ fun LoginScreen(
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(if (imeVisible) 12.dp else 28.dp))
 
             CupertinoGlassCard(
                 modifier = Modifier
