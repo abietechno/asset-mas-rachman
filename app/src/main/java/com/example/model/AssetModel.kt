@@ -80,6 +80,9 @@ data class AssetEntity(
 
     // --- Vehicle specific fields ---
     val vehicleType: VehicleType? = null,
+    val brand: String? = null, // Merk kendaraan (Toyota, Honda, ...)
+    val vehicleModel: String? = null, // Model/varian (Innova Zenix, Vario 160, ...)
+    val yearManufacture: Int? = null, // Tahun pembuatan
     val licensePlate: String? = null, // Nomor Plat Polisi (e.g. B 1024 SPO)
     val engineNumber: String? = null, // Nomor Mesin
     val chassisNumber: String? = null, // Nomor Rangka (VIN)
@@ -98,6 +101,7 @@ data class AssetEntity(
     val buildingAreaM2: Double? = null, // Luas Bangunan (m²)
     val numberOfFloors: Int? = null, // Jumlah Lantai
     val pbgNumber: String? = null, // Nomor IMB / PBG
+    val address: String? = null, // Alamat lengkap (diisi dari dashboard; hanya ditampilkan di HP)
 
     // --- Office Inventory specific fields ---
     // --- Pin lokasi (Tanah / Rumah & Bangunan) ---

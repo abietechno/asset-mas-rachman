@@ -36,10 +36,11 @@ class AssetRepository(private val assetDao: AssetDao) {
             clientUuid = existing.clientUuid,
             serverVersion = existing.serverVersion,
             createdAt = existing.createdAt,
+            // Field yang hanya bisa diisi dari dashboard: pertahankan nilainya saat aset disimpan dari HP.
             annualTaxAmount = asset.annualTaxAmount ?: existing.annualTaxAmount,
-            lastServiceDate = asset.lastServiceDate ?: existing.lastServiceDate,
             numberOfFloors = asset.numberOfFloors ?: existing.numberOfFloors,
             pbgNumber = asset.pbgNumber ?: existing.pbgNumber,
+            address = asset.address ?: existing.address,
             department = asset.department ?: existing.department
         )
         assetDao.updateAsset(merged.copy(updatedAt = System.currentTimeMillis(), syncState = dirtyState(existing ?: merged)))

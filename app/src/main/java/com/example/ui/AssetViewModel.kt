@@ -41,7 +41,7 @@ enum class CupertinoTab(val label: String) {
     DASHBOARD("Ringkasan"),
     ASSETS("Semua Aset"),
     VEHICLES("Kendaraan & Pajak"),
-    REPORTS("Laporan Real-Time")
+    SETTINGS("Pengaturan")
 }
 
 data class DashboardAnalytics(
@@ -261,6 +261,9 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
     // Filters for Assets list
     val assetSearchQuery = MutableStateFlow("")
     val assetCategoryFilter = MutableStateFlow<AssetType?>(null) // null = Semua
+    // Filter per kategori kustom dari dashboard (mis. "Alat Berat"). Lebih spesifik daripada jenis bidang:
+    // dua kategori bisa punya jenis bidang sama, jadi filter ini dipakai lebih dulu bila terisi.
+    val assetCategoryIdFilter = MutableStateFlow<Long?>(null)
     val assetStatusFilter = MutableStateFlow<AssetStatus?>(null)
 
     // Filters for Vehicle list
@@ -307,8 +310,9 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
         allAssets,
         assetSearchQuery,
         assetCategoryFilter,
-        assetStatusFilter
-    ) { assets, query, cat, status ->
+        assetStatusFilter,
+        assetCategoryIdFilter
+    ) { assets, query, cat, status, categoryId ->
         assets.filter { asset ->
             val matchQuery = query.isBlank() ||
                     asset.name.contains(query, ignoreCase = true) ||
@@ -316,7 +320,11 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
                     asset.location.contains(query, ignoreCase = true) ||
                     asset.pic.contains(query, ignoreCase = true) ||
                     (asset.licensePlate?.contains(query, ignoreCase = true) == true)
-            val matchCat = cat == null || asset.type == cat
+            val matchCat = when {
+                categoryId != null -> asset.categoryId == categoryId
+                cat != null -> asset.type == cat
+                else -> true
+            }
             val matchStatus = status == null || asset.status == status
             matchQuery && matchCat && matchStatus
         }
@@ -428,28 +436,6 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
             }
             _userMessage.emit("Pajak tahunan untuk ${vehicle.licensePlate ?: vehicle.name} berhasil diperpanjang +1 tahun.")
             requestSync()
-        }
-    }
-
-    fun triggerTaxRemindersNow() {
-        viewModelScope.launch {
-            val vehicles = allAssets.value.filter { it.type == AssetType.KENDARAAN }
-            val urgent = vehicles.filter {
-                val status = FormatUtils.getTaxStatus(it.annualTaxDueDate)
-                status == TaxStatus.EXPIRED || status == TaxStatus.CRITICAL || status == TaxStatus.WARNING
-            }
-
-            if (urgent.isEmpty()) {
-                _userMessage.emit("Seluruh kendaraan memiliki masa berlaku pajak yang masih aman.")
-                return@launch
-            }
-
-            val count = NotificationHelper.dispatchBatchTaxAlerts(getApplication(), urgent)
-            if (count > 0) {
-                _userMessage.emit("$count notifikasi pengingat pajak berhasil dikirim ke perangkat.")
-            } else {
-                _userMessage.emit("Ditemukan ${urgent.size} kendaraan jatuh tempo. (Aktifkan izin notifikasi pada perangkat).")
-            }
         }
     }
 

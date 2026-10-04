@@ -40,6 +40,9 @@ class AssetMapperTest {
         chassisNumber = "VIN1",
         bpkbNumber = "BPKB1",
         stnkNumber = "STNK1",
+        brand = "Toyota",
+        vehicleModel = "Innova Zenix",
+        yearManufacture = 2024,
         annualTaxDueDate = day.parse("2026-03-01")!!.time,
         fiveYearPlateDueDate = day.parse("2030-03-01")!!.time,
         annualTaxAmount = 4_500_000.0,
@@ -57,7 +60,8 @@ class AssetMapperTest {
                 categoryId = d.categoryId, code = d.code, usefulLifeYears = d.usefulLifeYears,
                 salvageValue = d.salvageValue, pic = d.pic, department = d.department,
                 vehicleType = d.vehicleType, bpkbNumber = d.bpkbNumber, stnkNumber = d.stnkNumber,
-                fiveYearPlateDueDate = d.fiveYearPlateDueDate, annualTaxAmount = d.annualTaxAmount,
+                model = d.model, yearManufacture = d.yearManufacture,
+                fiveYearPlateDueDate = d.fiveYearPlateDueDate, annualTaxAmount = e.annualTaxAmount,
                 lastServiceDate = d.lastServiceDate, numberOfFloors = d.numberOfFloors, pbgNumber = d.pbgNumber,
                 serialNumber = d.serialNumber, price = d.price, purchaseDate = d.purchaseDate,
                 condition = d.condition, description = d.description, location = d.location, status = d.status,
@@ -130,6 +134,38 @@ class AssetMapperTest {
 
         val cleared = AssetMapper.toChange(manual.copy(latitude = null, longitude = null))
         assertNull(cleared.data!!.latitude)
+    }
+
+    @Test
+    fun brandModelAndYearRoundTrip() {
+        val original = vehicle()
+        val back = AssetMapper.toEntity(serverEcho(original), original)
+
+        assertEquals("Toyota", back.brand)
+        assertEquals("Innova Zenix", back.vehicleModel)
+        assertEquals(2024, back.yearManufacture)
+    }
+
+    @Test
+    fun fieldsOwnedByDashboardAreNeverSentFromThePhone() {
+        // Estimasi pajak tahunan & alamat hanya bisa diisi di dashboard; HP tidak boleh mengirimnya
+        // (kalau dikirim null, server akan menghapus isian itu).
+        val json = Moshi.Builder().build().adapter(PushChange::class.java).serializeNulls()
+            .toJson(AssetMapper.toChange(vehicle()))
+
+        assertFalse(json, json.contains("annual_tax_amount"))
+        assertFalse(json, json.contains("\"address\""))
+        // Yang bisa diisi di HP tetap terkirim.
+        assertTrue(json, json.contains("\"brand\":\"Toyota\""))
+        assertTrue(json, json.contains("\"model\":\"Innova Zenix\""))
+        assertTrue(json, json.contains("\"year_manufacture\":2024"))
+        assertTrue(json, json.contains("last_service_date"))
+    }
+
+    @Test
+    fun inventoryUsesBrandModelColumnForBrand() {
+        val item = vehicle().copy(type = AssetType.INVENTARIS, brand = null, brandModel = "MacBook Pro M3")
+        assertEquals("MacBook Pro M3", AssetMapper.toChange(item).data!!.brand)
     }
 
     @Test

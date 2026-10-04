@@ -12,7 +12,11 @@ import java.util.UUID
 
 /**
  * Pemetaan AssetEntity (Room) <-> kolom aset di dashboard. Semua field aplikasi punya kolom sendiri di server,
- * jadi tidak ada yang disembunyikan di `details`. `type` di server = jenis bidang kategori
+ * jadi tidak ada yang disembunyikan di `details`.
+ *
+ * Field yang hanya bisa diisi dari dashboard (estimasi pajak tahunan, alamat, jumlah lantai, no. IMB/PBG,
+ * departemen) sengaja TIDAK dikirim dari HP: aplikasi hanya menerimanya saat pull, supaya menyimpan aset dari
+ * HP tidak pernah menghapus isian milik dashboard. `type` di server = jenis bidang kategori
  * (TANAH | BANGUNAN | KENDARAAN | INVENTARIS), sama persis dengan [AssetType].
  */
 object AssetMapper {
@@ -97,14 +101,15 @@ object AssetMapper {
         status = serverStatus(e.status),
         vehicleType = e.vehicleType?.name,
         licensePlate = e.licensePlate,
-        brand = e.brandModel,
+        brand = if (e.type == AssetType.INVENTARIS) e.brandModel else e.brand,
+        model = e.vehicleModel,
+        yearManufacture = e.yearManufacture,
         engineNumber = e.engineNumber,
         vin = e.chassisNumber,
         bpkbNumber = e.bpkbNumber,
         stnkNumber = e.stnkNumber,
         taxDueDate = formatDate(e.annualTaxDueDate),
         fiveYearPlateDueDate = formatDate(e.fiveYearPlateDueDate),
-        annualTaxAmount = e.annualTaxAmount,
         lastServiceDate = formatDate(e.lastServiceDate),
         certificateType = e.certificateType,
         certificateNumber = e.certificateNumber,
@@ -167,6 +172,10 @@ object AssetMapper {
             longitude = r.longitude,
             locationAccuracyM = r.locationAccuracy,
             locationCapturedAt = parseInstant(r.locationCapturedAt),
+            brand = r.brand,
+            vehicleModel = r.model,
+            yearManufacture = r.yearManufacture,
+            address = r.address,
             brandModel = r.brand,
             serialNumber = r.serialNumber,
             department = r.department,

@@ -1,6 +1,5 @@
 package com.example.ui.dialogs
 
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,8 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,9 +23,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.example.model.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.model.AssetCondition
+import com.example.model.AssetEntity
+import com.example.model.AssetStatus
+import com.example.model.AssetType
+import com.example.model.VehicleType
 import com.example.ui.AssetViewModel
 import com.example.ui.components.CupertinoCard
+import com.example.ui.components.CupertinoDateField
+import com.example.ui.components.CupertinoTextField
 import com.example.ui.theme.*
 import com.example.util.FormatUtils
 import java.util.Calendar
@@ -35,7 +40,44 @@ import java.util.Calendar
 /** Pilihan kategori di form; [id] null = jenis bawaan saat belum ada data dari server. */
 private data class CategoryOption(val id: Long?, val name: String, val kind: AssetType, val usefulLifeYears: Int?)
 
-@OptIn(ExperimentalMaterial3Api::class)
+private fun defaultLife(kind: AssetType) = when (kind) {
+    AssetType.TANAH -> 0
+    AssetType.BANGUNAN -> 20
+    AssetType.KENDARAAN -> 8
+    AssetType.INVENTARIS -> 4
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = CupertinoSecondaryLabel,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(bottom = 6.dp)
+    )
+}
+
+/** Isian angka (digit saja) dengan pratinjau rupiah di bawahnya. */
+@Composable
+private fun MoneyField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String? = null
+) {
+    CupertinoTextField(
+        value = value,
+        onValueChange = { onValueChange(it.filter(Char::isDigit)) },
+        label = label,
+        placeholder = "0",
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        supportingText = value.toDoubleOrNull()?.takeIf { it > 0 }?.let { FormatUtils.formatRupiah(it) },
+        modifier = (testTag?.let { modifier.testTag(it) } ?: modifier)
+    )
+}
+
 @Composable
 fun AddEditAssetDialog(
     editingAsset: AssetEntity?,
@@ -43,9 +85,9 @@ fun AddEditAssetDialog(
     onDismiss: () -> Unit
 ) {
     val isEditMode = editingAsset != null && editingAsset.id != 0L
-
     val serverCategories by viewModel.categories.collectAsStateWithLifecycle()
-    // Tanpa data server (mode offline) form memakai 4 jenis bawaan; kategori kustom dari dashboard muncul setelah sync.
+
+    // Tanpa data server (mode offline) form memakai 4 jenis bawaan; kategori kustom muncul setelah sync.
     val options = if (serverCategories.isEmpty()) {
         AssetType.values().map { CategoryOption(null, it.displayName, it, null) }
     } else {
@@ -56,67 +98,124 @@ fun AddEditAssetDialog(
     var categoryId by remember {
         mutableStateOf(editingAsset?.categoryId ?: serverCategories.firstOrNull { it.kind == type && it.isSystem }?.id)
     }
-    var name by remember { mutableStateOf(editingAsset?.name ?: "") }
 
-    // Pin lokasi (hanya Tanah / Rumah & Bangunan)
-    var latitude by remember { mutableStateOf(editingAsset?.latitude) }
-    var longitude by remember { mutableStateOf(editingAsset?.longitude) }
-    var locAccuracy by remember { mutableStateOf(editingAsset?.locationAccuracyM) }
-    var locCapturedAt by remember { mutableStateOf(editingAsset?.locationCapturedAt) }
-    var showLocationPicker by remember { mutableStateOf(false) }
+    // Informasi utama
+    var name by remember { mutableStateOf(editingAsset?.name ?: "") }
     var code by remember {
-        mutableStateOf(
-            editingAsset?.code ?: "AST-${type.name.take(3)}-${(System.currentTimeMillis() % 10000)}"
-        )
+        mutableStateOf(editingAsset?.code ?: "AST-${type.name.take(3)}-${System.currentTimeMillis() % 10000}")
     }
-    var acquisitionCostStr by remember {
-        mutableStateOf(
-            if (editingAsset != null && editingAsset.acquisitionCost > 0) editingAsset.acquisitionCost.toLong().toString() else ""
-        )
+    var costStr by remember {
+        mutableStateOf(editingAsset?.acquisitionCost?.takeIf { it > 0 }?.toLong()?.toString() ?: "")
     }
+    var acquisitionDate by remember { mutableStateOf(editingAsset?.acquisitionDate ?: System.currentTimeMillis()) }
     var usefulLifeStr by remember {
-        mutableStateOf(
-            if (editingAsset != null) editingAsset.usefulLifeYears.toString()
-            else if (type == AssetType.TANAH) "0" else if (type == AssetType.BANGUNAN) "20" else if (type == AssetType.KENDARAAN) "8" else "4"
-        )
+        mutableStateOf((editingAsset?.usefulLifeYears ?: defaultLife(type)).toString())
     }
-    var salvageValueStr by remember {
-        mutableStateOf(
-            if (editingAsset != null && editingAsset.salvageValue > 0) editingAsset.salvageValue.toLong().toString() else "0"
-        )
+    var salvageStr by remember {
+        mutableStateOf(editingAsset?.salvageValue?.takeIf { it > 0 }?.toLong()?.toString() ?: "")
     }
-    var location by remember { mutableStateOf(editingAsset?.location ?: "Kantor Pusat Jakarta") }
-    var pic by remember { mutableStateOf(editingAsset?.pic ?: "General Affairs") }
+    var location by remember { mutableStateOf(editingAsset?.location ?: "") }
+    var pic by remember { mutableStateOf(editingAsset?.pic ?: "") }
+    var notes by remember { mutableStateOf(editingAsset?.notes ?: "") }
     var status by remember { mutableStateOf(editingAsset?.status ?: AssetStatus.DIGUNAKAN) }
     var condition by remember { mutableStateOf(editingAsset?.condition ?: AssetCondition.BAIK) }
-    var notes by remember { mutableStateOf(editingAsset?.notes ?: "") }
 
-    // Vehicle fields
+    // Kendaraan
     var vehicleType by remember { mutableStateOf(editingAsset?.vehicleType ?: VehicleType.MOBIL) }
     var licensePlate by remember { mutableStateOf(editingAsset?.licensePlate ?: "") }
+    var brand by remember { mutableStateOf(editingAsset?.brand ?: "") }
+    var vehicleModel by remember { mutableStateOf(editingAsset?.vehicleModel ?: "") }
+    var yearStr by remember { mutableStateOf(editingAsset?.yearManufacture?.toString() ?: "") }
     var engineNumber by remember { mutableStateOf(editingAsset?.engineNumber ?: "") }
     var chassisNumber by remember { mutableStateOf(editingAsset?.chassisNumber ?: "") }
     var bpkbNumber by remember { mutableStateOf(editingAsset?.bpkbNumber ?: "") }
     var stnkNumber by remember { mutableStateOf(editingAsset?.stnkNumber ?: "") }
-    var taxMonthsOffset by remember { mutableStateOf(12) } // default 12 months ahead
+    var annualTaxDue by remember {
+        mutableStateOf(editingAsset?.annualTaxDueDate ?: Calendar.getInstance().apply { add(Calendar.YEAR, 1) }.timeInMillis)
+    }
+    var platePlateDue by remember { mutableStateOf(editingAsset?.fiveYearPlateDueDate) }
+    var lastServiceDate by remember { mutableStateOf(editingAsset?.lastServiceDate) }
 
-    // Property fields
+    // Tanah / Bangunan
     var certType by remember { mutableStateOf(editingAsset?.certificateType ?: "SHM") }
     var certNumber by remember { mutableStateOf(editingAsset?.certificateNumber ?: "") }
     var pbbNop by remember { mutableStateOf(editingAsset?.pbbNop ?: "") }
     var landAreaStr by remember { mutableStateOf(editingAsset?.landAreaM2?.toString() ?: "") }
     var buildingAreaStr by remember { mutableStateOf(editingAsset?.buildingAreaM2?.toString() ?: "") }
 
-    // Inventory fields
+    // Pin lokasi (Tanah / Bangunan)
+    var latitude by remember { mutableStateOf(editingAsset?.latitude) }
+    var longitude by remember { mutableStateOf(editingAsset?.longitude) }
+    var locAccuracy by remember { mutableStateOf(editingAsset?.locationAccuracyM) }
+    var locCapturedAt by remember { mutableStateOf(editingAsset?.locationCapturedAt) }
+    var showLocationPicker by remember { mutableStateOf(false) }
+
+    // Inventaris
     var brandModel by remember { mutableStateOf(editingAsset?.brandModel ?: "") }
     var serialNumber by remember { mutableStateOf(editingAsset?.serialNumber ?: "") }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    val isVehicle = type == AssetType.KENDARAAN
+    val isProperty = type == AssetType.TANAH || type == AssetType.BANGUNAN
+
+    fun save() {
+        if (name.isBlank()) {
+            errorMessage = "Nama aset wajib diisi."
+            return
+        }
+        if (isVehicle && licensePlate.isBlank()) {
+            errorMessage = "Plat nomor wajib diisi untuk kendaraan."
+            return
+        }
+
+        viewModel.saveAsset(
+            AssetEntity(
+                id = editingAsset?.id ?: 0L,
+                name = name.trim(),
+                code = code.trim(),
+                type = type,
+                categoryId = categoryId,
+                acquisitionCost = costStr.toDoubleOrNull() ?: 0.0,
+                acquisitionDate = acquisitionDate,
+                usefulLifeYears = if (type == AssetType.TANAH) 0 else (usefulLifeStr.toIntOrNull() ?: defaultLife(type)),
+                salvageValue = salvageStr.toDoubleOrNull() ?: 0.0,
+                location = location.trim(),
+                pic = pic.trim(),
+                status = status,
+                condition = condition,
+                notes = notes.trim(),
+                // Kendaraan
+                vehicleType = if (isVehicle) vehicleType else null,
+                brand = if (isVehicle) brand.trim().ifBlank { null } else null,
+                vehicleModel = if (isVehicle) vehicleModel.trim().ifBlank { null } else null,
+                yearManufacture = if (isVehicle) yearStr.toIntOrNull() else null,
+                licensePlate = if (isVehicle) licensePlate.trim().uppercase() else null,
+                engineNumber = if (isVehicle) engineNumber.trim().uppercase() else null,
+                chassisNumber = if (isVehicle) chassisNumber.trim().uppercase() else null,
+                bpkbNumber = if (isVehicle) bpkbNumber.trim().ifBlank { null } else null,
+                stnkNumber = if (isVehicle) stnkNumber.trim().ifBlank { null } else null,
+                annualTaxDueDate = if (isVehicle) annualTaxDue else null,
+                fiveYearPlateDueDate = if (isVehicle) platePlateDue else null,
+                lastServiceDate = if (isVehicle) lastServiceDate else null,
+                // Tanah / Bangunan
+                certificateType = if (isProperty) certType.trim().ifBlank { null } else null,
+                certificateNumber = if (isProperty) certNumber.trim().ifBlank { null } else null,
+                pbbNop = if (isProperty) pbbNop.trim().ifBlank { null } else null,
+                landAreaM2 = if (isProperty) landAreaStr.toDoubleOrNull() else null,
+                buildingAreaM2 = if (type == AssetType.BANGUNAN) buildingAreaStr.toDoubleOrNull() else null,
+                latitude = if (isProperty) latitude else null,
+                longitude = if (isProperty) longitude else null,
+                locationAccuracyM = if (isProperty) locAccuracy else null,
+                locationCapturedAt = if (isProperty) locCapturedAt else null,
+                // Inventaris (field Merk & Model perangkat memakai kolom brandModel)
+                brandModel = if (type == AssetType.INVENTARIS) brandModel.trim().ifBlank { null } else editingAsset?.brandModel,
+                serialNumber = if (type == AssetType.INVENTARIS) serialNumber.trim().ifBlank { null } else null
+            )
+        )
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -124,91 +223,30 @@ fun AddEditAssetDialog(
             color = MaterialTheme.colorScheme.background
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Cupertino Modal Top Bar
+                // Header ringkas
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     border = BorderStroke(0.5.dp, CupertinoSeparator)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .statusBarsPadding()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(onClick = onDismiss) {
-                            Text("Batal", color = CupertinoSecondaryLabel, style = MaterialTheme.typography.bodyLarge)
+                            Text("Batal", color = CupertinoSecondaryLabel)
                         }
-
                         Text(
-                            text = if (isEditMode) "Edit Data Aset" else "Tambah Aset Baru",
+                            text = if (isEditMode) "Edit Aset" else "Tambah Aset",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-
-                        TextButton(
-                            onClick = {
-                                if (name.isBlank()) {
-                                    errorMessage = "Nama aset wajib diisi."
-                                    return@TextButton
-                                }
-                                val cost = acquisitionCostStr.toDoubleOrNull() ?: 0.0
-                                val usefulYears = if (type == AssetType.TANAH) 0 else (usefulLifeStr.toIntOrNull() ?: 5)
-                                val salvage = salvageValueStr.toDoubleOrNull() ?: 0.0
-
-                                val cal = Calendar.getInstance()
-                                val annualTaxDue = if (type == AssetType.KENDARAAN) {
-                                    editingAsset?.annualTaxDueDate ?: Calendar.getInstance().apply {
-                                        add(Calendar.MONTH, taxMonthsOffset)
-                                    }.timeInMillis
-                                } else null
-
-                                val fiveYearPlateDue = if (type == AssetType.KENDARAAN) {
-                                    editingAsset?.fiveYearPlateDueDate ?: Calendar.getInstance().apply {
-                                        add(Calendar.YEAR, 5)
-                                    }.timeInMillis
-                                } else null
-
-                                val assetToSave = AssetEntity(
-                                    id = editingAsset?.id ?: 0L,
-                                    name = name.trim(),
-                                    code = code.trim(),
-                                    type = type,
-                                    categoryId = categoryId,
-                                    latitude = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) latitude else null,
-                                    longitude = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) longitude else null,
-                                    locationAccuracyM = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) locAccuracy else null,
-                                    locationCapturedAt = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) locCapturedAt else null,
-                                    acquisitionCost = cost,
-                                    acquisitionDate = editingAsset?.acquisitionDate ?: System.currentTimeMillis(),
-                                    usefulLifeYears = usefulYears,
-                                    salvageValue = salvage,
-                                    location = location.trim(),
-                                    pic = pic.trim(),
-                                    status = status,
-                                    condition = condition,
-                                    notes = notes.trim(),
-                                    vehicleType = if (type == AssetType.KENDARAAN) vehicleType else null,
-                                    licensePlate = if (type == AssetType.KENDARAAN) licensePlate.trim().uppercase() else null,
-                                    engineNumber = if (type == AssetType.KENDARAAN) engineNumber.trim().uppercase() else null,
-                                    chassisNumber = if (type == AssetType.KENDARAAN) chassisNumber.trim().uppercase() else null,
-                                    bpkbNumber = if (type == AssetType.KENDARAAN) bpkbNumber.trim() else null,
-                                    stnkNumber = if (type == AssetType.KENDARAAN) stnkNumber.trim() else null,
-                                    annualTaxDueDate = annualTaxDue,
-                                    fiveYearPlateDueDate = fiveYearPlateDue,
-                                    certificateType = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) certType.trim() else null,
-                                    certificateNumber = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) certNumber.trim() else null,
-                                    pbbNop = if (type == AssetType.TANAH || type == AssetType.BANGUNAN) pbbNop.trim() else null,
-                                    landAreaM2 = landAreaStr.toDoubleOrNull(),
-                                    buildingAreaM2 = buildingAreaStr.toDoubleOrNull(),
-                                    brandModel = if (type == AssetType.INVENTARIS) brandModel.trim() else null,
-                                    serialNumber = if (type == AssetType.INVENTARIS) serialNumber.trim() else null
-                                )
-
-                                viewModel.saveAsset(assetToSave)
-                            }
-                        ) {
-                            Text("Simpan", color = CupertinoPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                        TextButton(onClick = { save() }, modifier = Modifier.testTag("save_asset_button")) {
+                            Text("Simpan", color = CupertinoPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -216,38 +254,32 @@ fun AddEditAssetDialog(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
+                        .imePadding()
                         .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(vertical = 16.dp)
+                    contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
-                    if (errorMessage != null) {
+                    errorMessage?.let { msg ->
                         item {
                             Surface(
-                                color = CupertinoRedLight,
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 12.dp)
+                                color = CupertinoRed.copy(alpha = 0.10f),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = errorMessage!!,
-                                    color = CupertinoRed,
+                                    text = msg,
                                     style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(12.dp)
+                                    color = CupertinoRed,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(10.dp)
                                 )
                             }
+                            Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
 
-                    // Kategori Selector
+                    // ── Kategori ──
                     item {
-                        Text(
-                            text = "KATEGORI ASET",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CupertinoSecondaryLabel,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-
+                        SectionTitle("KATEGORI ASET")
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -256,311 +288,300 @@ fun AddEditAssetDialog(
                         ) {
                             options.forEach { o ->
                                 val isSelected = if (o.id != null) o.id == categoryId else o.kind == type
-                                val bg = if (isSelected) CupertinoPrimary else CupertinoFill
-                                val textCol = if (isSelected) Color.White else CupertinoLabel
-
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(bg)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isSelected) CupertinoPrimary else CupertinoFill)
                                         .clickable {
                                             type = o.kind
                                             categoryId = o.id
                                             if (!isEditMode) {
-                                                code = "AST-${o.kind.name.take(3)}-${(System.currentTimeMillis() % 10000)}"
-                                                usefulLifeStr = (o.usefulLifeYears ?: when (o.kind) {
-                                                    AssetType.TANAH -> 0
-                                                    AssetType.BANGUNAN -> 20
-                                                    AssetType.KENDARAAN -> 8
-                                                    AssetType.INVENTARIS -> 4
-                                                }).toString()
+                                                code = "AST-${o.kind.name.take(3)}-${System.currentTimeMillis() % 10000}"
+                                                usefulLifeStr = (o.usefulLifeYears ?: defaultLife(o.kind)).toString()
                                             }
                                         }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
                                 ) {
                                     Text(
                                         text = o.name,
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = textCol
+                                        color = if (isSelected) Color.White else CupertinoLabel
                                     )
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
 
-                    // Informasi Utama
+                    // ── Informasi utama ──
                     item {
-                        Text(
-                            text = "INFORMASI UTAMA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CupertinoSecondaryLabel,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-
+                        SectionTitle("INFORMASI UTAMA")
                         CupertinoCard {
-                            OutlinedTextField(
+                            CupertinoTextField(
                                 value = name,
-                                onValueChange = { name = it },
-                                label = { Text("Nama Aset *") },
-                                placeholder = { Text("contoh: Toyota Innova Zenix / Gudang Cikarang") },
-                                singleLine = true,
+                                onValueChange = { name = it; errorMessage = null },
+                                label = "Nama Aset *",
+                                placeholder = "contoh: Toyota Innova Zenix",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("input_asset_name")
                             )
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            OutlinedTextField(
-                                value = code,
-                                onValueChange = { code = it },
-                                label = { Text("Kode Tag Aset") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            OutlinedTextField(
-                                value = location,
-                                onValueChange = { location = it },
-                                label = { Text("Lokasi Fisik / Gedung") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            OutlinedTextField(
-                                value = pic,
-                                onValueChange = { pic = it },
-                                label = { Text("Penanggung Jawab (PIC)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-
-                    // Catatan Integrasi Web Admin
-                    item {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = CupertinoPrimary.copy(alpha = 0.08f),
-                            border = BorderStroke(0.5.dp, CupertinoPrimary.copy(alpha = 0.25f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = null,
-                                    tint = CupertinoPrimary,
-                                    modifier = Modifier.size(20.dp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CupertinoTextField(
+                                    value = code,
+                                    onValueChange = { code = it },
+                                    label = "Kode Tag",
+                                    modifier = Modifier.weight(1f)
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "Parameter keuangan, harga perolehan, dan metode depresiasi aset tersinkronisasi otomatis dengan Dashboard Web Admin.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = CupertinoLabel
+                                MoneyField(
+                                    label = "Nilai Perolehan",
+                                    value = costStr,
+                                    onValueChange = { costStr = it },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "input_acquisition_cost"
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            CupertinoDateField(
+                                label = "Tanggal Perolehan",
+                                value = acquisitionDate,
+                                onChange = { acquisitionDate = it ?: System.currentTimeMillis() },
+                                clearable = false,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            if (type != AssetType.TANAH) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoTextField(
+                                        value = usefulLifeStr,
+                                        onValueChange = { usefulLifeStr = it.filter(Char::isDigit).take(3) },
+                                        label = "Masa Manfaat (thn)",
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    MoneyField(
+                                        label = "Nilai Residu",
+                                        value = salvageStr,
+                                        onValueChange = { salvageStr = it },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CupertinoTextField(
+                                    value = location,
+                                    onValueChange = { location = it },
+                                    label = "Lokasi Fisik",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                CupertinoTextField(
+                                    value = pic,
+                                    onValueChange = { pic = it },
+                                    label = "Penanggung Jawab",
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
 
-                    // Bidang Khusus KENDARAAN (Mobil / Motor)
-                    if (type == AssetType.KENDARAAN) {
+                    // ── Kendaraan ──
+                    if (isVehicle) {
                         item {
-                            Text(
-                                text = "DETAIL KENDARAAN & PAJAK (MOBIL / MOTOR)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CupertinoSecondaryLabel,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 6.dp)
-                            )
-
+                            SectionTitle("DETAIL KENDARAAN & PAJAK")
                             CupertinoCard {
-                                // Jenis Kendaraan
-                                Text("Jenis Kendaraan", style = MaterialTheme.typography.labelSmall, color = CupertinoSecondaryLabel)
+                                Text(
+                                    text = "Jenis Kendaraan",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = CupertinoSecondaryLabel,
+                                    fontWeight = FontWeight.Medium
+                                )
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    listOf(VehicleType.MOBIL, VehicleType.MOTOR, VehicleType.TRUK).forEach { vt ->
-                                        val isSel = vt == vehicleType
+                                    VehicleType.values().forEach { vt ->
                                         FilterChip(
-                                            selected = isSel,
+                                            selected = vt == vehicleType,
                                             onClick = { vehicleType = vt },
-                                            label = { Text(vt.displayName) }
+                                            label = { Text(vt.displayName, style = MaterialTheme.typography.labelSmall) }
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                OutlinedTextField(
+                                CupertinoTextField(
                                     value = licensePlate,
-                                    onValueChange = { licensePlate = it.uppercase() },
-                                    label = { Text("Nomor Plat Polisi *") },
-                                    placeholder = { Text("contoh: B 1234 ABC") },
-                                    singleLine = true,
+                                    onValueChange = { licensePlate = it.uppercase(); errorMessage = null },
+                                    label = "Plat Nomor *",
+                                    placeholder = "B 1234 ABC",
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag("input_license_plate")
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedTextField(
-                                    value = engineNumber,
-                                    onValueChange = { engineNumber = it.uppercase() },
-                                    label = { Text("Nomor Mesin") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedTextField(
-                                    value = chassisNumber,
-                                    onValueChange = { chassisNumber = it.uppercase() },
-                                    label = { Text("Nomor Rangka (VIN)") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    OutlinedTextField(
-                                        value = stnkNumber,
-                                        onValueChange = { stnkNumber = it },
-                                        label = { Text("Nomor STNK") },
-                                        singleLine = true,
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoTextField(
+                                        value = brand,
+                                        onValueChange = { brand = it },
+                                        label = "Merk",
+                                        placeholder = "Toyota",
                                         modifier = Modifier.weight(1f)
                                     )
-                                    OutlinedTextField(
+                                    CupertinoTextField(
+                                        value = vehicleModel,
+                                        onValueChange = { vehicleModel = it },
+                                        label = "Model",
+                                        placeholder = "Innova Zenix",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoTextField(
+                                        value = yearStr,
+                                        onValueChange = { yearStr = it.filter(Char::isDigit).take(4) },
+                                        label = "Tahun",
+                                        placeholder = "2024",
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CupertinoTextField(
+                                        value = chassisNumber,
+                                        onValueChange = { chassisNumber = it.uppercase() },
+                                        label = "No. Rangka (VIN)",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoTextField(
+                                        value = engineNumber,
+                                        onValueChange = { engineNumber = it.uppercase() },
+                                        label = "No. Mesin",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CupertinoTextField(
                                         value = bpkbNumber,
                                         onValueChange = { bpkbNumber = it },
-                                        label = { Text("Nomor BPKB") },
-                                        singleLine = true,
+                                        label = "No. BPKB",
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
+                                Spacer(modifier = Modifier.height(8.dp))
 
+                                CupertinoTextField(
+                                    value = stnkNumber,
+                                    onValueChange = { stnkNumber = it },
+                                    label = "No. STNK",
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                                 Spacer(modifier = Modifier.height(10.dp))
 
-                                Text(
-                                    text = "Jatuh Tempo Pajak Tahunan:",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = CupertinoSecondaryLabel
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf(1 to "1 Bulan Lagi", 6 to "6 Bulan Lagi", 12 to "1 Tahun Lagi").forEach { (months, lbl) ->
-                                        FilterChip(
-                                            selected = taxMonthsOffset == months,
-                                            onClick = { taxMonthsOffset = months },
-                                            label = { Text(lbl) }
-                                        )
-                                    }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoDateField(
+                                        label = "Jatuh Tempo Pajak",
+                                        value = annualTaxDue,
+                                        onChange = { annualTaxDue = it ?: annualTaxDue },
+                                        clearable = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CupertinoDateField(
+                                        label = "Plat 5 Tahunan",
+                                        value = platePlateDue,
+                                        onChange = { platePlateDue = it },
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
-                            }
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                                CupertinoDateField(
+                                    label = "Servis Terakhir (dasar pengingat servis)",
+                                    value = lastServiceDate,
+                                    onChange = { lastServiceDate = it },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
                     }
 
-                    // Bidang Khusus TANAH & BANGUNAN
-                    if (type == AssetType.TANAH || type == AssetType.BANGUNAN) {
+                    // ── Tanah / Bangunan ──
+                    if (isProperty) {
                         item {
-                            Text(
-                                text = "DETAIL LEGALITAS PROPERTI",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CupertinoSecondaryLabel,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 6.dp)
-                            )
-
+                            SectionTitle("LEGALITAS PROPERTI")
                             CupertinoCard {
-                                OutlinedTextField(
-                                    value = certType,
-                                    onValueChange = { certType = it },
-                                    label = { Text("Tipe Sertifikat (SHM / HGB / Girik)") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoTextField(
+                                        value = certType,
+                                        onValueChange = { certType = it },
+                                        label = "Tipe Sertifikat",
+                                        placeholder = "SHM / HGB",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CupertinoTextField(
+                                        value = certNumber,
+                                        onValueChange = { certNumber = it },
+                                        label = "No. Sertifikat",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedTextField(
-                                    value = certNumber,
-                                    onValueChange = { certNumber = it },
-                                    label = { Text("Nomor Sertifikat") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedTextField(
+                                CupertinoTextField(
                                     value = pbbNop,
                                     onValueChange = { pbbNop = it },
-                                    label = { Text("Nomor Objek Pajak (NOP PBB)") },
-                                    singleLine = true,
+                                    label = "NOP PBB",
                                     modifier = Modifier.fillMaxWidth()
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    OutlinedTextField(
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CupertinoTextField(
                                         value = landAreaStr,
                                         onValueChange = { landAreaStr = it.filter { c -> c.isDigit() || c == '.' } },
-                                        label = { Text("Luas Tanah (m²)") },
+                                        label = "Luas Tanah (m²)",
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true,
                                         modifier = Modifier.weight(1f)
                                     )
                                     if (type == AssetType.BANGUNAN) {
-                                        OutlinedTextField(
+                                        CupertinoTextField(
                                             value = buildingAreaStr,
                                             onValueChange = { buildingAreaStr = it.filter { c -> c.isDigit() || c == '.' } },
-                                            label = { Text("Luas Bangunan (m²)") },
+                                            label = "Luas Bangunan (m²)",
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                            singleLine = true,
                                             modifier = Modifier.weight(1f)
                                         )
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
+                                Text(
+                                    text = "Jumlah lantai, No. IMB/PBG, dan alamat lengkap diisi dari dashboard web.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = CupertinoSecondaryLabel,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
                             }
-
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
-                    }
 
-                    // Pin lokasi di peta (TANAH & BANGUNAN)
-                    if (type == AssetType.TANAH || type == AssetType.BANGUNAN) {
+                        // ── Pin lokasi ──
                         item {
-                            Text(
-                                text = "LOKASI DI PETA",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CupertinoSecondaryLabel,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 6.dp)
-                            )
-
+                            SectionTitle("LOKASI DI PETA")
                             CupertinoCard {
                                 val lat = latitude
                                 val lng = longitude
@@ -577,149 +598,142 @@ fun AddEditAssetDialog(
                                     )
                                 } else {
                                     Text(
-                                        text = "Belum ada pin lokasi. Ambil dari GPS saat Anda berada di lokasi aset.",
+                                        text = "Belum ada pin lokasi. Cari alamat, ambil dari GPS, atau ketuk peta.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = CupertinoSecondaryLabel
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                     OutlinedButton(
                                         onClick = { showLocationPicker = true },
-                                        modifier = Modifier.weight(1f).testTag("btn_set_location")
-                                    ) { Text(if (lat != null) "Ubah Pin" else "Ambil Lokasi") }
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("btn_set_location")
+                                    ) {
+                                        Icon(Icons.Outlined.Place, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(if (lat != null) "Ubah Pin" else "Pilih Lokasi")
+                                    }
                                     if (lat != null) {
-                                        TextButton(
-                                            onClick = {
-                                                latitude = null
-                                                longitude = null
-                                                locAccuracy = null
-                                                locCapturedAt = null
-                                            }
-                                        ) { Text("Hapus Pin", color = CupertinoRed) }
+                                        TextButton(onClick = {
+                                            latitude = null
+                                            longitude = null
+                                            locAccuracy = null
+                                            locCapturedAt = null
+                                        }) { Text("Hapus", color = CupertinoRed) }
                                     }
                                 }
                             }
-
-                            if (showLocationPicker) {
-                                LocationPickerDialog(
-                                    initialLat = latitude,
-                                    initialLng = longitude,
-                                    initialAccuracyM = locAccuracy,
-                                    onDismiss = { showLocationPicker = false },
-                                    onConfirm = { la, lo, acc, addr ->
-                                        latitude = la
-                                        longitude = lo
-                                        locAccuracy = acc
-                                        locCapturedAt = System.currentTimeMillis()
-                                        // Alamat dari pencarian/peta mengisi kolom Lokasi bila masih kosong atau nilai awal bawaan.
-                                        if (!addr.isNullOrBlank() && (location.isBlank() || location.startsWith("Kantor Pusat"))) location = addr
-                                        showLocationPicker = false
-                                    }
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
                     }
 
-                    // Bidang Khusus INVENTARIS
+                    // ── Inventaris ──
                     if (type == AssetType.INVENTARIS) {
                         item {
-                            Text(
-                                text = "DETAIL INVENTARIS KANTOR",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CupertinoSecondaryLabel,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 6.dp)
-                            )
-
+                            SectionTitle("DETAIL INVENTARIS")
                             CupertinoCard {
-                                OutlinedTextField(
+                                CupertinoTextField(
                                     value = brandModel,
                                     onValueChange = { brandModel = it },
-                                    label = { Text("Merk & Model Perangkat") },
-                                    placeholder = { Text("contoh: MacBook Pro M3 / Server Dell") },
-                                    singleLine = true,
+                                    label = "Merk & Model Perangkat",
+                                    placeholder = "MacBook Pro M3",
                                     modifier = Modifier.fillMaxWidth()
                                 )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedTextField(
+                                Spacer(modifier = Modifier.height(8.dp))
+                                CupertinoTextField(
                                     value = serialNumber,
                                     onValueChange = { serialNumber = it },
-                                    label = { Text("Serial Number / Barcode") },
-                                    singleLine = true,
+                                    label = "Nomor Seri / Barcode",
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
-
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
                     }
 
-                    // Status & Kondisi
+                    // ── Status & kondisi ──
                     item {
-                        Text(
-                            text = "STATUS & KONDISI",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CupertinoSecondaryLabel,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-
+                        SectionTitle("STATUS & KONDISI")
                         CupertinoCard {
-                            Text("Status Operasional", style = MaterialTheme.typography.labelSmall, color = CupertinoSecondaryLabel)
+                            Text(
+                                text = "Status Operasional",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CupertinoSecondaryLabel,
+                                fontWeight = FontWeight.Medium
+                            )
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 AssetStatus.values().forEach { st ->
                                     FilterChip(
                                         selected = status == st,
                                         onClick = { status = st },
-                                        label = { Text(st.displayName) }
+                                        label = { Text(st.displayName, style = MaterialTheme.typography.labelSmall) }
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                            Text("Kondisi Fisik", style = MaterialTheme.typography.labelSmall, color = CupertinoSecondaryLabel)
+                            Text(
+                                text = "Kondisi Fisik",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CupertinoSecondaryLabel,
+                                fontWeight = FontWeight.Medium
+                            )
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 AssetCondition.values().forEach { cond ->
                                     FilterChip(
                                         selected = condition == cond,
                                         onClick = { condition = cond },
-                                        label = { Text(cond.displayName) }
+                                        label = { Text(cond.displayName, style = MaterialTheme.typography.labelSmall) }
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                            OutlinedTextField(
+                            CupertinoTextField(
                                 value = notes,
                                 onValueChange = { notes = it },
-                                label = { Text("Catatan Tambahan") },
-                                maxLines = 3,
+                                label = "Catatan Aset",
+                                singleLine = false,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
                     }
                 }
             }
         }
+    }
+
+    if (showLocationPicker) {
+        LocationPickerDialog(
+            initialLat = latitude,
+            initialLng = longitude,
+            initialAccuracyM = locAccuracy,
+            onDismiss = { showLocationPicker = false },
+            onConfirm = { la, lo, acc, addr ->
+                latitude = la
+                longitude = lo
+                locAccuracy = acc
+                locCapturedAt = System.currentTimeMillis()
+                // Alamat dari pencarian/peta mengisi kolom Lokasi bila masih kosong.
+                if (!addr.isNullOrBlank() && location.isBlank()) location = addr
+                showLocationPicker = false
+            }
+        )
     }
 }

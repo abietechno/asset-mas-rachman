@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.model.AssetEntity
 import com.example.model.CategoryEntity
 
-@Database(entities = [AssetEntity::class, CategoryEntity::class], version = 4, exportSchema = false)
+@Database(entities = [AssetEntity::class, CategoryEntity::class], version = 5, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
@@ -52,6 +52,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Merk/Model/Tahun kendaraan + alamat properti, menyamakan data dengan dashboard. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE assets ADD COLUMN brand TEXT")
+                db.execSQL("ALTER TABLE assets ADD COLUMN vehicleModel TEXT")
+                db.execSQL("ALTER TABLE assets ADD COLUMN yearManufacture INTEGER")
+                db.execSQL("ALTER TABLE assets ADD COLUMN address TEXT")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -62,7 +72,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "company_assets.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
