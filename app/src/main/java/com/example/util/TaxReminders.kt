@@ -102,42 +102,79 @@ object TaxReminders {
     private const val PREFS = "tax_reminders"
     private const val WORK_NAME = "tax_reminders_periodic"
 
-    /** Memeriksa data lokal dan mengirim notifikasi yang perlu. Mengembalikan jumlah notifikasi terkirim. */
-    suspend fun check(context: Context): Int {
+    /** Hasil pemeriksaan pengingat, dipakai juga untuk pesan uji di layar Pengaturan. */
+    data class CheckResult(
+        val due: Int,
+        /** Pengingat yang baru naik tingkat urgensinya, jadi dibunyikan. */
+        val alerted: Int,
+        /** Pengingat yang sekarang terpasang di panel notifikasi. */
+        val posted: Int,
+        val notificationsEnabled: Boolean
+    ) {
+        fun message(): String = when {
+            !notificationsEnabled -> "Izin notifikasi mati. Aktifkan di Pengaturan HP agar pengingat bisa muncul."
+            due == 0 -> "Tidak ada kendaraan yang mendekati jatuh tempo."
+            posted == 0 -> "$due jatuh tempo, tetapi pengingat gagal dipasang. Periksa pengaturan notifikasi aplikasi."
+            alerted > 0 -> "$alerted pengingat baru dikirim, $posted tampil di panel notifikasi."
+            else -> "$posted pengingat tampil di panel notifikasi dari $due yang jatuh tempo."
+        }
+    }
+
+    /** Memeriksa data lokal dan memasang notifikasi yang perlu. */
+    suspend fun check(context: Context): CheckResult {
         val app = context.applicationContext
         val assets = AppDatabase.getDatabase(app).assetDao().getAllAssets().first()
         val items = ReminderPlanner.plan(assets, System.currentTimeMillis())
 
+        // Kanal dibuat lebih awal supaya pengaturan notifikasi aplikasi sudah terlihat di HP
+        // walaupun belum ada pengingat yang dipasang.
+        NotificationHelper.initNotificationChannel(app)
+
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val activeKeys = items.map { it.key }.toSet()
         val editor = prefs.edit()
-        // Buang catatan kendaraan yang sudah beres (diperpanjang / dihapus) supaya tidak menumpuk.
-        prefs.all.keys.filter { k -> k.drop(2) !in activeKeys }.forEach { editor.remove(it) }
+        // Kendaraan yang sudah beres (diperpanjang / dihapus): buang catatannya dan tarik
+        // notifikasinya, supaya penanda di ikon aplikasi ikut turun.
+        prefs.all.keys.filter { k -> k.drop(2) !in activeKeys }.forEach { k ->
+            editor.remove(k)
+            NotificationHelper.cancelReminder(app, NotificationHelper.notificationIdFor(k.drop(2)))
+        }
 
         // Tanpa izin notifikasi: jangan catat sebagai terkirim, supaya dicoba lagi setelah izin diberikan.
         val canNotify = NotificationManagerCompat.from(app).areNotificationsEnabled()
-        var sent = 0
+        var alerted = 0
+        var posted = 0
         val now = System.currentTimeMillis()
         if (canNotify) {
             for (item in items) {
                 val lastLevel = prefs.getInt("L:${item.key}", 0)
                 val lastAt = prefs.getLong("T:${item.key}", 0L)
-                if (!ReminderPlanner.shouldNotify(lastLevel, lastAt, item.level, now)) continue
+                // Naik tingkat urgensi -> dibunyikan. Selain itu notifikasi tetap dipasang ulang
+                // (id sama, jadi memperbarui yang lama) tanpa bunyi, supaya tidak hilang diam-diam
+                // dan penanda pada ikon aplikasi tetap ada selama belum beres.
+                val alert = ReminderPlanner.shouldNotify(lastLevel, lastAt, item.level, now)
                 val ok = NotificationHelper.sendTaxReminderNotification(
                     context = app,
-                    notificationId = item.key.hashCode() and 0x7fffffff,
+                    notificationId = NotificationHelper.notificationIdFor(item.key),
                     title = item.title,
                     message = item.message,
-                    assetId = item.assetId
+                    assetId = item.assetId,
+                    alert = alert
                 )
-                if (ok) {
+                if (!ok) continue
+                posted++
+                if (alert) {
                     editor.putInt("L:${item.key}", item.level).putLong("T:${item.key}", now)
-                    sent++
+                    alerted++
                 }
             }
         }
         editor.apply()
-        return sent
+
+        // Ringkasan hanya berguna bila pengingatnya lebih dari satu.
+        if (canNotify && posted >= 2) NotificationHelper.showSummary(app, posted) else NotificationHelper.clearSummary(app)
+
+        return CheckResult(due = items.size, alerted = alerted, posted = posted, notificationsEnabled = canNotify)
     }
 
     /** Pengecekan berkala di latar belakang (dua kali sehari), tanpa perlu aplikasi dibuka. Aman dipanggil berulang. */

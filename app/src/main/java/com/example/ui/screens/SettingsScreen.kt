@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,8 @@ import com.example.ui.components.CupertinoSectionHeader
 import com.example.ui.components.CupertinoSegmentedControl
 import com.example.ui.components.CupertinoTopBar
 import com.example.ui.theme.*
+import com.example.util.TaxReminders
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -50,6 +53,9 @@ fun SettingsScreen(
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
 
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    var reminderMessage by remember { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LazyColumn(
         modifier = modifier
@@ -187,11 +193,15 @@ fun SettingsScreen(
                 )
                 CupertinoListTile(
                     title = "Pengingat Otomatis",
-                    subtitle = "Pajak tahunan, plat 5 tahunan & servis berkala aktif",
+                    subtitle = reminderMessage
+                        ?: "Pajak, plat 5 tahunan & servis. Ketuk untuk memeriksa sekarang.",
                     leadingIcon = Icons.Outlined.NotificationsActive,
                     leadingIconTint = CupertinoOrange,
                     leadingIconBg = CupertinoOrange.copy(alpha = 0.12f),
-                    showDivider = false
+                    showDivider = false,
+                    onClick = {
+                        scope.launch { reminderMessage = TaxReminders.check(context).message() }
+                    }
                 )
             }
         }

@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">Asset Manajemen</string>
+    <!-- Dipakai sebagai label di layar utama HP; dibuat pendek supaya tidak terpotong. -->
+    <string name="app_name">Assets ESB</string>
 </resources>
