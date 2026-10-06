@@ -64,8 +64,15 @@ data class RemoteAsset(
     @Json(name = "land_area") val landArea: Double? = null,
     @Json(name = "building_area") val buildingArea: Double? = null,
     val address: String? = null,
-    @Json(name = "pbb_number") val pbbNumber: String? = null
+    @Json(name = "pbb_number") val pbbNumber: String? = null,
+    val photos: List<RemotePhoto> = emptyList()
 )
+
+@JsonClass(generateAdapter = true)
+data class RemotePhoto(val id: Long, val url: String? = null)
+
+@JsonClass(generateAdapter = true)
+data class UploadPhotoResponse(val message: String? = null, val image: RemotePhoto? = null)
 
 @JsonClass(generateAdapter = true)
 data class RemoteCategory(

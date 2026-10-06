@@ -12,7 +12,12 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
+import okhttp3.MultipartBody
+import retrofit2.http.DELETE
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
+import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
@@ -31,6 +36,13 @@ interface ApiService {
 
     @POST("api/sync/assets")
     suspend fun push(@Body body: PushRequest): PushResponse
+
+    @Multipart
+    @POST("api/assets/{id}/images")
+    suspend fun uploadPhoto(@Path("id") assetServerId: Long, @Part image: MultipartBody.Part): UploadPhotoResponse
+
+    @DELETE("api/images/{id}")
+    suspend fun deletePhoto(@Path("id") imageServerId: Long): Response<Unit>
 }
 
 object ApiClient {

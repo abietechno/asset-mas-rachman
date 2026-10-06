@@ -24,16 +24,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.example.model.AssetCondition
 import com.example.model.AssetEntity
 import com.example.model.AssetStatus
 import com.example.model.AssetType
 import com.example.model.VehicleType
 import com.example.ui.AssetViewModel
+import com.example.data.PhotoEntity
+import com.example.data.PhotoState
+import com.example.ui.components.AssetPhotoPicker
 import com.example.ui.components.CupertinoCard
 import com.example.ui.components.CupertinoDateField
 import com.example.ui.components.CupertinoTextField
 import com.example.ui.theme.*
+import com.example.util.PhotoStore
 import com.example.util.FormatUtils
 import java.util.Calendar
 
@@ -156,6 +161,20 @@ fun AddEditAssetDialog(
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    // Aset yang sudah tersimpan: foto langsung masuk daftar. Aset baru: ditahan dulu karena belum punya id.
+    val savedPhotos by (if (isEditMode) viewModel.photosFor(editingAsset!!.id) else null)
+        ?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<PhotoEntity>()) }
+    var draftPhotoPaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+
+    val shownPhotos = if (isEditMode) {
+        savedPhotos
+    } else {
+        draftPhotoPaths.mapIndexed { i, path ->
+            PhotoEntity(id = -(i + 1).toLong(), assetLocalId = 0, localPath = path, state = PhotoState.PENDING_UPLOAD)
+        }
+    }
+
     val isVehicle = type == AssetType.KENDARAAN
     val isProperty = type == AssetType.TANAH || type == AssetType.BANGUNAN
 
@@ -170,7 +189,8 @@ fun AddEditAssetDialog(
         }
 
         viewModel.saveAsset(
-            AssetEntity(
+            newPhotoPaths = draftPhotoPaths,
+            asset = AssetEntity(
                 id = editingAsset?.id ?: 0L,
                 name = name.trim(),
                 code = code.trim(),
@@ -652,6 +672,38 @@ fun AddEditAssetDialog(
                             }
                             Spacer(modifier = Modifier.height(14.dp))
                         }
+                    }
+
+                    // ── Foto ──
+                    item {
+                        SectionTitle("FOTO ASET")
+                        CupertinoCard {
+                            AssetPhotoPicker(
+                                photos = shownPhotos,
+                                onPicked = { uri ->
+                                    scope.launch {
+                                        val path = viewModel.importPhoto(uri)
+                                        if (path == null) {
+                                            errorMessage = "Foto tidak bisa dibaca. Coba foto lain."
+                                        } else if (isEditMode) {
+                                            viewModel.addPhoto(editingAsset!!.id, path)
+                                        } else {
+                                            draftPhotoPaths = draftPhotoPaths + path
+                                        }
+                                    }
+                                },
+                                onRemove = { photo ->
+                                    if (photo.id < 0) {
+                                        // Foto aset baru yang belum tersimpan.
+                                        PhotoStore.delete(photo.localPath)
+                                        draftPhotoPaths = draftPhotoPaths.filterNot { it == photo.localPath }
+                                    } else {
+                                        viewModel.removePhoto(photo)
+                                    }
+                                }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
 
                     // ── Status & kondisi ──

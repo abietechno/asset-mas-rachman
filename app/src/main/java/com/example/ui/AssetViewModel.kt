@@ -9,6 +9,9 @@ import com.example.model.AssetCondition
 import com.example.model.AssetEntity
 import com.example.model.AssetStatus
 import com.example.model.AssetType
+import android.net.Uri
+import com.example.data.PhotoEntity
+import com.example.data.PhotoState
 import com.example.model.CategoryEntity
 import com.example.model.TaxStatus
 import com.example.model.VehicleType
@@ -23,6 +26,7 @@ import java.io.IOException
 import com.example.util.DepreciationCalculator
 import com.example.util.FormatUtils
 import com.example.util.NotificationHelper
+import com.example.util.PhotoStore
 import com.example.util.TaxReminders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -82,6 +86,7 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.assetDao()
+    private val photoDao = db.photoDao()
     private val prefs = SyncPrefs(application)
     private val repository: AssetRepository
 
@@ -398,13 +403,19 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
         _editingAsset.value = null
     }
 
-    fun saveAsset(asset: AssetEntity) {
+    /**
+     * [newPhotoPaths] berisi foto yang diambil untuk aset yang belum pernah disimpan; foto itu baru bisa
+     * dikaitkan setelah asetnya punya id.
+     */
+    fun saveAsset(asset: AssetEntity, newPhotoPaths: List<String> = emptyList()) {
         viewModelScope.launch {
             if (asset.id == 0L) {
-                repository.insertAsset(asset)
+                val newId = repository.insertAsset(asset)
+                attachPhotos(newId, newPhotoPaths)
                 _userMessage.emit("Aset baru '${asset.name}' berhasil disimpan.")
             } else {
                 repository.updateAsset(asset)
+                attachPhotos(asset.id, newPhotoPaths)
                 _userMessage.emit("Data aset '${asset.name}' berhasil diperbarui.")
             }
             // Update selected asset if currently viewed
@@ -413,6 +424,45 @@ class AssetViewModel(application: Application) : AndroidViewModel(application) {
             }
             closeAddEdit()
             requestSync()
+        }
+    }
+
+    // ───────────────────────── Foto aset ─────────────────────────
+
+    fun photosFor(assetLocalId: Long): StateFlow<List<PhotoEntity>> =
+        photoDao.observeForAsset(assetLocalId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Mengecilkan gambar dari kamera/galeri lalu menyimpannya sebagai berkas aplikasi. */
+    suspend fun importPhoto(uri: Uri): String? = PhotoStore.importFrom(getApplication(), uri)
+
+    private suspend fun attachPhotos(assetLocalId: Long, paths: List<String>) {
+        if (paths.isEmpty()) return
+        val sisa = PhotoStore.MAX_PHOTOS_PER_ASSET - photoDao.countForAsset(assetLocalId)
+        paths.take(sisa.coerceAtLeast(0)).forEach { path ->
+            photoDao.insert(PhotoEntity(assetLocalId = assetLocalId, localPath = path, state = PhotoState.PENDING_UPLOAD))
+        }
+        paths.drop(sisa.coerceAtLeast(0)).forEach { PhotoStore.delete(it) }
+    }
+
+    /** Dipakai saat mengedit aset yang sudah tersimpan: foto langsung masuk daftar dan ikut sinkronisasi. */
+    fun addPhoto(assetLocalId: Long, path: String) {
+        viewModelScope.launch {
+            attachPhotos(assetLocalId, listOf(path))
+            requestSync()
+        }
+    }
+
+    fun removePhoto(photo: PhotoEntity) {
+        viewModelScope.launch {
+            if (photo.serverId == null) {
+                // Belum pernah terkirim: cukup dibuang dari HP.
+                photoDao.deleteRow(photo.id)
+                PhotoStore.delete(photo.localPath)
+            } else {
+                photoDao.markForDelete(photo.id)
+                requestSync()
+            }
         }
     }
 

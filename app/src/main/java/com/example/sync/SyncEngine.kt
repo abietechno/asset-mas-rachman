@@ -1,9 +1,17 @@
 package com.example.sync
 
+import android.content.Context
 import androidx.room.withTransaction
 import com.example.data.AppDatabase
+import com.example.data.PhotoEntity
+import com.example.data.PhotoState
 import com.example.model.CategoryEntity
 import com.example.model.SyncState
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import retrofit2.HttpException
+import java.io.File
 
 data class SyncResult(
     val pushed: Int = 0,
@@ -12,10 +20,12 @@ data class SyncResult(
     val conflicts: Int = 0,
     /** Perubahan yang ditolak server (validasi); tetap antre dan dilaporkan. */
     val rejected: Int = 0,
+    val photosUploaded: Int = 0,
     val firstError: String? = null
 ) {
     fun summary(): String = buildString {
         append("Terkirim $pushed, diterima $pulled")
+        if (photosUploaded > 0) append(", $photosUploaded foto terkirim")
         if (conflicts > 0) append(", $conflicts konflik (versi server dipakai)")
         if (rejected > 0) append(", $rejected ditolak server: $firstError")
     }
@@ -29,10 +39,13 @@ data class SyncResult(
 class SyncEngine(
     private val db: AppDatabase,
     private val prefs: SyncPrefs,
+    /** Dibutuhkan untuk menghapus berkas foto setelah terkirim; null saat dipakai di tes. */
+    private val context: Context? = null,
     private val apiFactory: (baseUrl: String, token: String?, device: DeviceInfo?) -> ApiService =
         { url, token, device -> ApiClient.create(url, token, device) }
 ) {
     private val dao = db.assetDao()
+    private val photoDao = db.photoDao()
 
     suspend fun sync(): SyncResult {
         val session = prefs.current()
@@ -41,8 +54,10 @@ class SyncEngine(
         val api = apiFactory(baseUrl, token, prefs.deviceInfo())
 
         val push = push(api)
+        // Foto menyusul setelah asetnya terkirim, karena unggah memerlukan id aset di server.
+        val photos = syncPhotos(api)
         val pulled = pull(api, session.lastPull)
-        return push.copy(pulled = pulled)
+        return push.copy(pulled = pulled, photosUploaded = photos)
     }
 
     private suspend fun push(api: ApiService): SyncResult {
@@ -61,8 +76,10 @@ class SyncEngine(
                         db.withTransaction {
                             val cur = dao.findByClientUuid(snapshot.clientUuid) ?: return@withTransaction
                             when {
-                                snapshot.syncState == SyncState.DELETED && cur.syncState == SyncState.DELETED ->
+                                snapshot.syncState == SyncState.DELETED && cur.syncState == SyncState.DELETED -> {
+                                    photoDao.deleteForAsset(cur.id)
                                     dao.deleteAssetById(cur.id)
+                                }
                                 remote == null -> Unit
                                 // Diubah lagi di HP saat request berjalan: catat versi server, biarkan DIRTY agar terkirim lagi.
                                 cur.updatedAt != snapshot.updatedAt ->
@@ -93,6 +110,89 @@ class SyncEngine(
         return result
     }
 
+    /**
+     * Mengirim foto baru dan menghapus foto yang dibuang di HP. Foto milik aset yang belum pernah terkirim
+     * dilewati dulu (belum punya id server) dan akan ikut pada sinkronisasi berikutnya.
+     */
+    private suspend fun syncPhotos(api: ApiService): Int {
+        var uploaded = 0
+
+        for (photo in photoDao.pending()) {
+            val asset = dao.getAssetByIdOnce(photo.assetLocalId)
+
+            when {
+                photo.state == PhotoState.PENDING_DELETE -> {
+                    val serverId = photo.serverId
+                    if (serverId == null) {
+                        photoDao.deleteRow(photo.id)
+                    } else {
+                        val response = api.deletePhoto(serverId)
+                        // 404 berarti sudah tidak ada di server; perlakukan sebagai selesai.
+                        if (response.isSuccessful || response.code() == 404) {
+                            photoDao.deleteRow(photo.id)
+                            com.example.util.PhotoStore.delete(photo.localPath)
+                        }
+                    }
+                }
+
+                photo.state == PhotoState.PENDING_UPLOAD -> {
+                    val serverAssetId = asset?.serverId ?: continue
+                    val file = photo.localPath?.let(::File)
+                    if (file == null || !file.exists()) {
+                        photoDao.deleteRow(photo.id) // berkasnya hilang; tidak ada yang bisa dikirim
+                        continue
+                    }
+
+                    val part = MultipartBody.Part.createFormData(
+                        "image",
+                        file.name,
+                        file.asRequestBody("image/jpeg".toMediaType())
+                    )
+                    try {
+                        val result = api.uploadPhoto(serverAssetId, part)
+                        val image = result.image
+                        if (image != null) {
+                            photoDao.markUploaded(photo.id, image.id, image.url)
+                            uploaded++
+                        }
+                    } catch (e: HttpException) {
+                        // Ditolak server (mis. bukan gambar / terlalu besar): buang supaya tidak terus dicoba.
+                        if (e.code() == 422) {
+                            photoDao.deleteRow(photo.id)
+                            com.example.util.PhotoStore.delete(photo.localPath)
+                        } else {
+                            throw e
+                        }
+                    }
+                }
+            }
+        }
+        return uploaded
+    }
+
+    /** Menyamakan daftar foto milik satu aset dengan yang ada di server (foto lokal yang menunggu tidak disentuh). */
+    private suspend fun syncPhotosFromServer(assetLocalId: Long, remote: List<RemotePhoto>) {
+        val known = photoDao.serverPhotosFor(assetLocalId).associateBy { it.serverId }
+        val remoteIds = remote.map { it.id }.toSet()
+
+        // Foto yang sudah tidak ada di server dibuang dari HP.
+        known.values.filter { it.serverId !in remoteIds && it.state == PhotoState.SYNCED }
+            .forEach {
+                photoDao.deleteRow(it.id)
+                com.example.util.PhotoStore.delete(it.localPath)
+            }
+
+        val baru = remote.filter { it.id !in known.keys }.map {
+            PhotoEntity(
+                assetLocalId = assetLocalId,
+                serverId = it.id,
+                remoteUrl = it.url,
+                state = PhotoState.SYNCED
+            )
+        }
+        if (baru.isNotEmpty()) photoDao.insertAll(baru)
+    }
+
     private suspend fun pull(api: ApiService, since: Long): Int {
         val response = api.pull(since)
         var applied = 0
@@ -104,9 +204,14 @@ class SyncEngine(
                 if (local != null && (local.syncState == SyncState.DIRTY || local.syncState == SyncState.DELETED)) continue
 
                 if (remote.deleted) {
-                    if (local != null) dao.deleteAssetById(local.id)
+                    if (local != null) {
+                        photoDao.deleteForAsset(local.id)
+                        dao.deleteAssetById(local.id)
+                    }
                 } else {
-                    dao.insertAsset(AssetMapper.toEntity(remote, local))
+                    val localId = dao.insertAsset(AssetMapper.toEntity(remote, local))
+                    // insertAsset mengembalikan 0 bila baris lama yang diganti; pakai id lama bila ada.
+                    syncPhotosFromServer(local?.id ?: localId, remote.photos)
                     applied++
                 }
             }

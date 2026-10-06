@@ -262,6 +262,18 @@ fun AssetDetailSheet(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
+            // ── Foto ──
+            item {
+                val photos by viewModel.photosFor(asset.id).collectAsStateWithLifecycle()
+                if (photos.isNotEmpty()) {
+                    SectionTitle("FOTO ASET")
+                    CupertinoCard {
+                        AssetPhotoGallery(photos = photos)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+
             // ── Nilai & penyusutan ──
             item {
                 SectionTitle("NILAI & PENYUSUTAN")

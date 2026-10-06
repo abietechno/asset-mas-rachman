@@ -233,6 +233,25 @@ class AssetMapperTest {
     }
 
     @Test
+    fun photosFromServerAreParsedWithIdAndUrl() {
+        val json = """{"server_time":1,"data":[{"id":1,"version":2,"name":"Tanah","type":"TANAH",
+            "photos":[{"id":7,"url":"https://asset.esbcloud.biz.id/storage/assets/a.jpg"},{"id":8,"url":null}]}]}"""
+        val asset = Moshi.Builder().build().adapter(PullResponse::class.java).fromJson(json)!!.data.single()
+
+        assertEquals(2, asset.photos.size)
+        assertEquals(7L, asset.photos[0].id)
+        assertEquals("https://asset.esbcloud.biz.id/storage/assets/a.jpg", asset.photos[0].url)
+        assertNull(asset.photos[1].url)
+    }
+
+    @Test
+    fun assetWithoutPhotosFieldStillParses() {
+        val json = """{"server_time":1,"data":[{"id":1,"version":2,"name":"X","type":"KENDARAAN"}]}"""
+        val asset = Moshi.Builder().build().adapter(PullResponse::class.java).fromJson(json)!!.data.single()
+        assertTrue(asset.photos.isEmpty())
+    }
+
+    @Test
     fun serverResponseWithCategoriesAndUnknownFieldsParses() {
         val json = """{"server_time":1,"data":[{"id":1,"version":2,"name":"X","type":"KENDARAAN","details":null,"extra":"ignored"}],
             "categories":[{"id":3,"name":"Kendaraan","kind":"KENDARAAN","useful_life_years":8,"is_system":true,"deleted":false}]}"""

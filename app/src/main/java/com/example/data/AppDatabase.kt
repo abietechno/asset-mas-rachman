@@ -10,11 +10,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.model.AssetEntity
 import com.example.model.CategoryEntity
 
-@Database(entities = [AssetEntity::class, CategoryEntity::class], version = 5, exportSchema = false)
+@Database(entities = [AssetEntity::class, CategoryEntity::class, PhotoEntity::class], version = 6, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun assetDao(): AssetDao
+
+    abstract fun photoDao(): PhotoDao
 
     companion object {
         /**
@@ -62,6 +64,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Foto aset: berkas lokal menunggu unggah, atau URL foto dari dashboard. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `asset_photos` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`assetLocalId` INTEGER NOT NULL, `serverId` INTEGER, `localPath` TEXT, `remoteUrl` TEXT, " +
+                        "`state` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_asset_photos_assetLocalId` ON `asset_photos` (`assetLocalId`)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -72,7 +86,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "company_assets.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
